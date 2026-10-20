@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { useParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import Header from '@/components/Header';
 import {
@@ -13,6 +13,7 @@ import {
   getSessionStatus,
   getNoteDownloadUrl,
   getFullMediaUrl,
+  deleteSession,
 } from '@/lib/api';
 import MarkdownRenderer from '@/components/MarkdownRenderer';
 import ExamTipsView from '@/components/ExamTipsView';
@@ -23,6 +24,7 @@ import AudioChunksView from '@/components/AudioChunksView';
 import ProcessingPipeline from '@/components/ProcessingPipeline';
 import DevignerBadge from '@/components/DevignerBadge';
 import CopyButton from '@/components/CopyButton';
+import ConfirmDeleteModal from '@/components/ConfirmDeleteModal';
 import {
   ArrowRight,
   FileText,
@@ -37,10 +39,12 @@ import {
   Loader2,
   AlertCircle,
   RefreshCw,
+  Trash2,
 } from 'lucide-react';
 
 export default function SessionDetailPage() {
   const params = useParams();
+  const router = useRouter();
   const courseId = Number(params.courseId);
   const sessionId = Number(params.sessionId);
 
@@ -55,6 +59,8 @@ export default function SessionDetailPage() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState('');
+  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const pollTimerRef = useRef(null);
 
   const loadData = useCallback(async (isSilent = false) => {
@@ -117,6 +123,18 @@ export default function SessionDetailPage() {
     },
     [loadData]
   );
+
+  const handleDeleteSession = async () => {
+    setDeleting(true);
+    try {
+      await deleteSession(sessionId);
+      router.push(`/archive/${courseId}`);
+    } catch (err) {
+      alert(err?.message || 'خطا در حذف جلسه');
+      setDeleting(false);
+      setIsDeleteModalOpen(false);
+    }
+  };
 
   const isStillProcessing =
     !note &&
@@ -242,6 +260,16 @@ export default function SessionDetailPage() {
                     دانلود فایل Markdown (.md)
                   </a>
                 )}
+
+                <button
+                  type="button"
+                  onClick={() => setIsDeleteModalOpen(true)}
+                  title="حذف این جلسه"
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-full border border-rose-200 bg-rose-50 hover:bg-rose-100 text-xs font-semibold text-rose-700 transition-colors shadow-2xs cursor-pointer"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>حذف جلسه</span>
+                </button>
               </div>
             </div>
           </div>
@@ -374,7 +402,13 @@ export default function SessionDetailPage() {
                       <span>آزمون ۴ گزینه‌ای پس از تحلیل متن جلسه به صورت هوشمند تولید خواهد شد.</span>
                     </div>
                   )}
-                  <QuizView quizzes={quizzes} />
+                  <QuizView
+                    quizzes={quizzes}
+                    sessionId={sessionId}
+                    onQuizGenerated={(newQuiz) => {
+                      setQuizzes((prev) => [...prev, newQuiz]);
+                    }}
+                  />
                 </div>
               )}
 
@@ -408,6 +442,17 @@ export default function SessionDetailPage() {
           )}
         </div>
       </main>
+
+      {/* Delete Session Confirmation Modal */}
+      <ConfirmDeleteModal
+        isOpen={isDeleteModalOpen}
+        onClose={() => setIsDeleteModalOpen(false)}
+        onConfirm={handleDeleteSession}
+        loading={deleting}
+        title="حذف جلسه کلاسی"
+        description={`آیا از حذف «${note?.title || session?.title || `جلسه ${sessionId}`}» اطمینان دارید؟ تمام جزوات، آزمون‌ها و تکه‌های صوتی این جلسه پاک خواهند شد.`}
+        confirmText="بله، حذف جلسه"
+      />
     </>
   );
 }

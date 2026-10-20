@@ -1,11 +1,12 @@
 'use client';
 
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { useParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import Header from '@/components/Header';
-import { getCourses, getSessions } from '@/lib/api';
+import { getCourses, getSessions, deleteCourse, deleteSession } from '@/lib/api';
 import DevignerBadge from '@/components/DevignerBadge';
+import ConfirmDeleteModal from '@/components/ConfirmDeleteModal';
 import {
   ArrowRight,
   Calendar,
@@ -17,16 +18,27 @@ import {
   Mic,
   ChevronLeft,
   RefreshCw,
+  Trash2,
+  AlertTriangle,
 } from 'lucide-react';
 
 export default function CourseSessionsPage() {
   const params = useParams();
+  const router = useRouter();
   const courseId = Number(params.courseId);
+
   const [course, setCourse] = useState(null);
   const [sessions, setSessions] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const pollIntervalRef = useRef(null);
+
+  // Deletion modals state
+  const [isDeleteCourseOpen, setIsDeleteCourseOpen] = useState(false);
+  const [deletingCourse, setDeletingCourse] = useState(false);
+
+  const [sessionToDelete, setSessionToDelete] = useState(null);
+  const [deletingSession, setDeletingSession] = useState(false);
 
   const loadData = useCallback(async (isSilent = false) => {
     if (!isSilent) setRefreshing(true);
@@ -36,7 +48,8 @@ export default function CourseSessionsPage() {
         getSessions(courseId).catch(() => []),
       ]);
 
-      setCourse((coursesData || []).find((c) => c.id === courseId) || null);
+      const foundCourse = (coursesData || []).find((c) => c.id === courseId) || null;
+      setCourse(foundCourse);
       setSessions(sessionsData || []);
     } catch {
       // Offline fallback
@@ -68,6 +81,32 @@ export default function CourseSessionsPage() {
       if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
     };
   }, [sessions, loadData]);
+
+  const handleDeleteCourse = async () => {
+    setDeletingCourse(true);
+    try {
+      await deleteCourse(courseId);
+      router.push('/archive');
+    } catch (err) {
+      alert(err?.message || 'خطا در حذف درس.');
+      setDeletingCourse(false);
+      setIsDeleteCourseOpen(false);
+    }
+  };
+
+  const handleDeleteSession = async () => {
+    if (!sessionToDelete) return;
+    setDeletingSession(true);
+    try {
+      await deleteSession(sessionToDelete.id);
+      setSessions((prev) => prev.filter((s) => s.id !== sessionToDelete.id));
+      setSessionToDelete(null);
+    } catch (err) {
+      alert(err?.message || 'خطا در حذف جلسه.');
+    } finally {
+      setDeletingSession(false);
+    }
+  };
 
   const getStatusBadge = (status, statusDisplay) => {
     switch (status) {
@@ -140,13 +179,26 @@ export default function CourseSessionsPage() {
                 </div>
               </div>
 
-              <Link
-                href="/record"
-                className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-2xl bg-primary-600 hover:bg-primary-700 text-white text-xs sm:text-sm font-bold transition-all shadow-xs shrink-0"
-              >
-                <Mic className="w-4 h-4" />
-                <span>ضبط جلسه جدید</span>
-              </Link>
+              {/* Course Actions */}
+              <div className="flex items-center gap-2 self-start sm:self-center shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setIsDeleteCourseOpen(true)}
+                  title="حذف این درس"
+                  className="inline-flex items-center gap-1.5 px-3 py-2.5 rounded-2xl border border-rose-200 text-rose-600 hover:bg-rose-50 text-xs font-semibold transition-colors cursor-pointer"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>حذف درس</span>
+                </button>
+
+                <Link
+                  href="/record"
+                  className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-2xl bg-primary-600 hover:bg-primary-700 text-white text-xs sm:text-sm font-bold transition-all shadow-xs"
+                >
+                  <Mic className="w-4 h-4" />
+                  <span>ضبط جلسه جدید</span>
+                </Link>
+              </div>
             </div>
           )}
 
@@ -214,18 +266,20 @@ export default function CourseSessionsPage() {
                 const isProcessing = session.status === 'PROCESSING' || session.status === 'PENDING';
 
                 return (
-                  <Link
+                  <div
                     key={session.id}
-                    href={`/archive/${courseId}/${session.id}`}
-                    className={`group flex items-center gap-4 bg-white rounded-3xl border p-5 transition-all duration-300 ${
+                    className={`group relative flex items-center gap-4 bg-white rounded-3xl border p-5 transition-all duration-300 ${
                       isProcessing
                         ? 'border-purple-200/90 bg-purple-50/10 hover:border-primary-400'
                         : 'border-gray-200/80 hover:border-primary-300 hover:shadow-md hover:shadow-primary/5'
                     }`}
                   >
-                    <div className="flex-1 min-w-0 text-right">
+                    <Link
+                      href={`/archive/${courseId}/${session.id}`}
+                      className="flex-1 min-w-0 text-right"
+                    >
                       <div className="flex flex-wrap items-center gap-2 mb-1.5">
-                        <h3 className="font-bold text-gray-900 text-sm sm:text-base truncate">
+                        <h3 className="font-bold text-gray-900 text-sm sm:text-base truncate group-hover:text-primary-600 transition-colors">
                           {session.title}
                         </h3>
                         {getStatusBadge(session.status, session.status_display)}
@@ -265,19 +319,59 @@ export default function CourseSessionsPage() {
                           چت RAG
                         </span>
                       </div>
-                    </div>
+                    </Link>
 
-                    <div className="w-9 h-9 rounded-full bg-gray-50 group-hover:bg-primary-50 flex items-center justify-center transition-colors shrink-0">
-                      <ChevronLeft className="w-4 h-4 text-gray-400 group-hover:text-primary-600 transition-colors" />
+                    {/* Actions: Delete Session button & Arrow */}
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          setSessionToDelete(session);
+                        }}
+                        title="حذف این جلسه"
+                        className="p-2 rounded-xl text-gray-300 hover:text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+
+                      <Link
+                        href={`/archive/${courseId}/${session.id}`}
+                        className="w-9 h-9 rounded-full bg-gray-50 group-hover:bg-primary-50 flex items-center justify-center transition-colors"
+                      >
+                        <ChevronLeft className="w-4 h-4 text-gray-400 group-hover:text-primary-600 transition-colors" />
+                      </Link>
                     </div>
-                  </Link>
+                  </div>
                 );
               })}
             </div>
           )}
         </div>
       </main>
+
+      {/* Delete Course Confirmation Modal */}
+      <ConfirmDeleteModal
+        isOpen={isDeleteCourseOpen}
+        onClose={() => setIsDeleteCourseOpen(false)}
+        onConfirm={handleDeleteCourse}
+        title="حذف درس"
+        itemTitle={course?.name}
+        description="آیا مطمئن هستید که می‌خواهید این درس را حذف کنید؟ با این کار تمامی جلسات ثبت‌شده، جزوه‌ها، نکات و آزمون‌های آن به صورت دائمی پاک خواهند شد."
+        loading={deletingCourse}
+      />
+
+      {/* Delete Session Confirmation Modal */}
+      <ConfirmDeleteModal
+        isOpen={Boolean(sessionToDelete)}
+        onClose={() => setSessionToDelete(null)}
+        onConfirm={handleDeleteSession}
+        title="حذف جلسه"
+        itemTitle={sessionToDelete?.title}
+        description="آیا از حذف این جلسه اطمینان دارید؟ صوت‌های ضبط‌شده و جزوه تولیدشده این جلسه حذف خواهند شد."
+        loading={deletingSession}
+      />
     </>
   );
 }
-

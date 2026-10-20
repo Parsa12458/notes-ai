@@ -58,6 +58,10 @@ export async function getCourses() {
   return request(`${API}/courses/`);
 }
 
+export async function getCourse(courseId) {
+  return request(`${API}/courses/${courseId}/`);
+}
+
 export async function getCurrentBell() {
   return request(`${API}/courses/current_bell/`);
 }
@@ -70,6 +74,55 @@ export async function createCourse(data) {
   });
 }
 
+export async function updateCourse(courseId, data) {
+  return request(`${API}/courses/${courseId}/`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+}
+
+export async function deleteCourse(courseId) {
+  return request(`${API}/courses/${courseId}/`, {
+    method: 'DELETE',
+  });
+}
+
+// ── Classrooms ───────────────────────────────
+
+export async function getClassrooms() {
+  return request(`${API}/classrooms/`);
+}
+
+export async function createClassroom(data) {
+  return request(`${API}/classrooms/`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+}
+
+// ── Schedules ────────────────────────────────
+
+export async function getSchedules(courseId) {
+  const url = courseId ? `${API}/schedules/?course=${courseId}` : `${API}/schedules/`;
+  return request(url);
+}
+
+export async function createSchedule(data) {
+  return request(`${API}/schedules/`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+}
+
+export async function deleteSchedule(scheduleId) {
+  return request(`${API}/schedules/${scheduleId}/`, {
+    method: 'DELETE',
+  });
+}
+
 // ── Sessions ─────────────────────────────────
 
 export async function getSessions(courseId) {
@@ -79,11 +132,29 @@ export async function getSessions(courseId) {
   return request(url);
 }
 
+export async function getSession(sessionId) {
+  return request(`${API}/sessions/${sessionId}/`);
+}
+
 export async function createSession(courseId, title) {
   return request(`${API}/sessions/`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ course: courseId, title }),
+  });
+}
+
+export async function updateSession(sessionId, data) {
+  return request(`${API}/sessions/${sessionId}/`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+}
+
+export async function deleteSession(sessionId) {
+  return request(`${API}/sessions/${sessionId}/`, {
+    method: 'DELETE',
   });
 }
 
@@ -130,6 +201,10 @@ export async function getNoteBySession(sessionId) {
   }
 }
 
+export async function getNote(noteId) {
+  return request(`${API}/notes/${noteId}/`);
+}
+
 export function getNoteDownloadUrl(noteId) {
   return `${API}/notes/${noteId}/download/`;
 }
@@ -146,6 +221,18 @@ export async function getQuizzes(sessionId) {
     }
     throw err;
   }
+}
+
+export async function generateQuiz(sessionId, title, description = '') {
+  return request(`${API}/quizzes/generate/`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      session: sessionId,
+      title: title || 'کوییز سنجش یادگیری جلسه',
+      description,
+    }),
+  });
 }
 
 export async function submitQuiz(quizId, studentName, answers) {
@@ -195,6 +282,13 @@ export async function getFlashcards(sessionId) {
   }
 }
 
+// ── Tips ─────────────────────────────────────
+
+export async function getTips(sessionId) {
+  const url = sessionId ? `${API}/tips/?session_id=${sessionId}` : `${API}/tips/`;
+  return request(url);
+}
+
 // ── Chat (RAG) ───────────────────────────────
 
 export async function askQuestion(courseId, question, sessionId) {
@@ -223,3 +317,12 @@ export async function askQuestion(courseId, question, sessionId) {
   };
 }
 
+export async function getConversations() {
+  return request(`${API}/chat/conversations/`);
+}
+
+export async function deleteConversation(conversationId) {
+  return request(`${API}/chat/conversations/${conversationId}/`, {
+    method: 'DELETE',
+  });
+}

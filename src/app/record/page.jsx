@@ -14,6 +14,7 @@ import {
 } from '@/lib/api';
 import DevignerBadge from '@/components/DevignerBadge';
 import ProcessingPipeline from '@/components/ProcessingPipeline';
+import AddCourseModal from '@/components/AddCourseModal';
 import {
   Mic,
   Square,
@@ -39,10 +40,13 @@ export default function RecordPage() {
   const [sessionId, setSessionId] = useState(null);
   const [sessionStatus, setSessionStatus] = useState(null);
 
-  // Quick course creation
-  const [showNewCourseInput, setShowNewCourseInput] = useState(false);
-  const [newCourseName, setNewCourseName] = useState('');
-  const [creatingCourse, setCreatingCourse] = useState(false);
+  // Add course modal
+  const [isAddCourseModalOpen, setIsAddCourseModalOpen] = useState(false);
+
+  const handleCourseCreated = (newCourse) => {
+    setCourses((prev) => [...prev, newCourse]);
+    setSelectedCourse(newCourse.id);
+  };
 
   // Recording state
   const [isRecording, setIsRecording] = useState(false);
@@ -117,24 +121,7 @@ export default function RecordPage() {
     return `${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
   };
 
-  const handleCreateQuickCourse = async () => {
-    if (!newCourseName.trim()) return;
-    setCreatingCourse(true);
-    try {
-      const created = await createCourse({
-        name: newCourseName.trim(),
-        color: '#7C3AED',
-      });
-      setCourses((prev) => [...prev, created]);
-      setSelectedCourse(created.id);
-      setNewCourseName('');
-      setShowNewCourseInput(false);
-    } catch {
-      setError('خطا در ایجاد درس جدید');
-    } finally {
-      setCreatingCourse(false);
-    }
-  };
+
 
   const handleStartSession = async () => {
     if (!selectedCourse) {
@@ -298,33 +285,13 @@ export default function RecordPage() {
                   </label>
                   <button
                     type="button"
-                    onClick={() => setShowNewCourseInput(!showNewCourseInput)}
+                    onClick={() => setIsAddCourseModalOpen(true)}
                     className="text-xs text-primary-600 hover:text-primary-700 font-semibold flex items-center gap-1 cursor-pointer"
                   >
                     <Plus className="w-3.5 h-3.5" />
                     <span>افزودن درس جدید</span>
                   </button>
                 </div>
-
-                {showNewCourseInput && (
-                  <div className="mb-3 p-3 bg-primary-50/60 rounded-2xl border border-primary-200/80 flex items-center gap-2">
-                    <input
-                      type="text"
-                      value={newCourseName}
-                      onChange={(e) => setNewCourseName(e.target.value)}
-                      placeholder="نام درس جدید (مثلاً فیزیک ۳)"
-                      className="flex-1 bg-white border border-gray-200 rounded-xl px-3 py-2 text-xs text-right focus:outline-none focus:border-primary-400"
-                    />
-                    <button
-                      type="button"
-                      onClick={handleCreateQuickCourse}
-                      disabled={creatingCourse || !newCourseName.trim()}
-                      className="px-3 py-2 bg-primary-600 text-white text-xs font-bold rounded-xl hover:bg-primary-700 transition-colors cursor-pointer disabled:opacity-50"
-                    >
-                      {creatingCourse ? 'در حال ثبت...' : 'ثبت درس'}
-                    </button>
-                  </div>
-                )}
 
                 <div className="relative">
                   <button
@@ -606,6 +573,13 @@ export default function RecordPage() {
           )}
         </div>
       </main>
+
+      {/* Add Course Modal */}
+      <AddCourseModal
+        isOpen={isAddCourseModalOpen}
+        onClose={() => setIsAddCourseModalOpen(false)}
+        onCourseCreated={handleCourseCreated}
+      />
     </>
   );
 }

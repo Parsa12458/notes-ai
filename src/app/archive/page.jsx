@@ -3,15 +3,35 @@
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import Header from '@/components/Header';
-import { getCourses } from '@/lib/api';
+import { getCourses, deleteCourse } from '@/lib/api';
 import DevignerBadge from '@/components/DevignerBadge';
-import { Archive, ArrowLeft, BookOpen, Search, User, MapPin, Loader2, RefreshCw } from 'lucide-react';
+import AddCourseModal from '@/components/AddCourseModal';
+import ConfirmDeleteModal from '@/components/ConfirmDeleteModal';
+import {
+  Archive,
+  ArrowLeft,
+  BookOpen,
+  Search,
+  User,
+  MapPin,
+  Loader2,
+  RefreshCw,
+  Plus,
+  Trash2,
+  Sparkles,
+} from 'lucide-react';
 
 export default function ArchivePage() {
   const [courses, setCourses] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+
+  // Modals state
+  const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [courseToDelete, setCourseToDelete] = useState(null);
+  const [deleting, setDeleting] = useState(false);
+  const [actionSuccess, setActionSuccess] = useState('');
 
   const fetchCourses = async () => {
     try {
@@ -34,6 +54,34 @@ export default function ArchivePage() {
     fetchCourses();
   };
 
+  const handleCourseCreated = (newCourse) => {
+    setCourses((prev) => [newCourse, ...prev]);
+    setActionSuccess(`درس «${newCourse.name}» با موفقیت افزوده شد.`);
+    setTimeout(() => setActionSuccess(''), 4000);
+  };
+
+  const handleDeleteClick = (e, course) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setCourseToDelete(course);
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!courseToDelete) return;
+    setDeleting(true);
+    try {
+      await deleteCourse(courseToDelete.id);
+      setCourses((prev) => prev.filter((c) => c.id !== courseToDelete.id));
+      setActionSuccess(`درس «${courseToDelete.name}» با موفقیت حذف شد.`);
+      setCourseToDelete(null);
+      setTimeout(() => setActionSuccess(''), 4000);
+    } catch (err) {
+      alert(err?.message || 'خطا در حذف درس.');
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   const filteredCourses = courses.filter((c) => {
     const q = searchQuery.toLowerCase().trim();
     if (!q) return true;
@@ -50,6 +98,7 @@ export default function ArchivePage() {
       <Header />
       <main className="pt-16 pb-12 min-h-dvh px-4 sm:px-6">
         <div className="max-w-2xl mx-auto pt-6 page-transition">
+          {/* Header Title */}
           <div className="text-center mb-8">
             <div className="w-16 h-16 rounded-3xl bg-primary-50 border border-primary-100 flex items-center justify-center mx-auto mb-4 text-primary-600 shadow-sm">
               <Archive className="w-8 h-8" />
@@ -63,12 +112,27 @@ export default function ArchivePage() {
               </DevignerBadge>
             </div>
             <p className="text-xs sm:text-sm text-gray-400">
-              برای مشاهده جلسات، جزوه‌ها، آزمون‌ها و چت RAG، ابتدا درس خود را انتخاب کنید.
+              برای مشاهده جلسات، جزوه‌ها، آزمون‌ها و چت RAG، ابتدا درس خود را انتخاب کنید یا درس جدید بیفزایید.
             </p>
           </div>
 
-          {/* Search bar & Refresh */}
-          <div className="mb-6 flex items-center gap-2">
+          {/* Success Banner */}
+          {actionSuccess && (
+            <div className="mb-6 p-4 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs sm:text-sm font-semibold flex items-center justify-between shadow-2xs animate-in fade-in duration-200">
+              <span>{actionSuccess}</span>
+              <button
+                type="button"
+                onClick={() => setActionSuccess('')}
+                className="text-emerald-600 hover:text-emerald-900 text-xs cursor-pointer"
+              >
+                بستن
+              </button>
+            </div>
+          )}
+
+          {/* Action Bar (Search, Add Course, Refresh) */}
+          <div className="mb-6 flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5">
+            {/* Search Input */}
             <div className="relative flex-1">
               <Search className="w-4 h-4 text-gray-400 absolute right-4 top-1/2 -translate-y-1/2" />
               <input
@@ -80,15 +144,28 @@ export default function ArchivePage() {
               />
             </div>
 
-            <button
-              type="button"
-              onClick={handleRefresh}
-              disabled={refreshing}
-              title="بروزرسانی لیست دروس"
-              className="p-3 bg-white hover:bg-gray-50 border border-gray-200/90 rounded-2xl text-gray-600 hover:text-gray-900 transition-colors shadow-2xs cursor-pointer shrink-0"
-            >
-              <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin text-primary-600' : ''}`} />
-            </button>
+            <div className="flex items-center gap-2">
+              {/* Add Course Button */}
+              <button
+                type="button"
+                onClick={() => setIsAddModalOpen(true)}
+                className="flex-1 sm:flex-initial inline-flex items-center justify-center gap-2 px-4 py-3 rounded-2xl bg-primary-600 hover:bg-primary-700 text-white text-xs sm:text-sm font-bold transition-all shadow-xs cursor-pointer whitespace-nowrap"
+              >
+                <Plus className="w-4 h-4" />
+                <span>افزودن درس جدید</span>
+              </button>
+
+              {/* Refresh Button */}
+              <button
+                type="button"
+                onClick={handleRefresh}
+                disabled={refreshing}
+                title="بروزرسانی لیست دروس"
+                className="p-3 bg-white hover:bg-gray-50 border border-gray-200/90 rounded-2xl text-gray-600 hover:text-gray-900 transition-colors shadow-2xs cursor-pointer shrink-0"
+              >
+                <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin text-primary-600' : ''}`} />
+              </button>
+            </div>
           </div>
 
           {/* Loading Skeletons */}
@@ -113,63 +190,112 @@ export default function ArchivePage() {
               </div>
             </div>
           ) : filteredCourses.length === 0 ? (
-            <div className="bg-white rounded-3xl border border-gray-200/80 p-12 text-center shadow-sm">
-              <BookOpen className="w-10 h-10 text-gray-300 mx-auto mb-3" />
-              <h3 className="text-sm font-semibold text-gray-700">درسی یافت نشد</h3>
-              <p className="text-xs text-gray-400 mt-1">
-                {searchQuery ? 'با این عبارت جست‌وجو درسی ثبت نشده است.' : 'هنوز درسی در سامانه ثبت نشده است.'}
-              </p>
+            <div className="bg-white rounded-3xl border border-gray-200/80 p-12 text-center shadow-sm space-y-4">
+              <BookOpen className="w-12 h-12 text-gray-300 mx-auto" />
+              <div>
+                <h3 className="text-base font-bold text-gray-800">درسی یافت نشد</h3>
+                <p className="text-xs text-gray-400 mt-1">
+                  {searchQuery
+                    ? 'با این عبارت جست‌وجو درسی ثبت نشده است.'
+                    : 'هنوز درسی در سامانه ثبت نشده است. می‌توانید اولین درس را اضافه کنید.'}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsAddModalOpen(true)}
+                className="inline-flex items-center gap-2 px-5 py-2.5 rounded-2xl bg-primary-600 hover:bg-primary-700 text-white text-xs font-bold transition-all shadow-xs cursor-pointer"
+              >
+                <Plus className="w-4 h-4" />
+                <span>ایجاد اولین درس کلاسی</span>
+              </button>
             </div>
           ) : (
             <div className="space-y-3">
               {filteredCourses.map((course) => (
-                <Link
+                <div
                   key={course.id}
-                  href={`/archive/${course.id}`}
-                  className="group flex items-center gap-4 bg-white rounded-3xl border border-gray-200/80 p-5 hover:border-primary-300 hover:shadow-md hover:shadow-primary/5 transition-all duration-300"
+                  className="group relative flex items-center gap-4 bg-white rounded-3xl border border-gray-200/80 p-5 hover:border-primary-300 hover:shadow-md hover:shadow-primary/5 transition-all duration-300"
                 >
-                  <div
-                    className="w-13 h-13 rounded-2xl flex items-center justify-center text-white font-black text-xl shrink-0 shadow-sm"
-                    style={{ backgroundColor: course.color || '#7C3AED' }}
+                  <Link
+                    href={`/archive/${course.id}`}
+                    className="flex items-center gap-4 flex-1 min-w-0"
                   >
-                    {course.name ? course.name.charAt(0) : 'د'}
-                  </div>
-                  <div className="flex-1 min-w-0 text-right">
-                    <div className="flex items-center gap-2 mb-1">
-                      <h3 className="font-bold text-gray-900 text-sm sm:text-base truncate">
-                        {course.name}
-                      </h3>
-                      {course.code && (
-                        <span className="text-[10px] bg-gray-100 text-gray-600 px-2 py-0.5 rounded-md font-mono">
-                          {course.code}
-                        </span>
-                      )}
+                    <div
+                      className="w-13 h-13 rounded-2xl flex items-center justify-center text-white font-black text-xl shrink-0 shadow-sm"
+                      style={{ backgroundColor: course.color || '#7C3AED' }}
+                    >
+                      {course.name ? course.name.charAt(0) : 'د'}
                     </div>
 
-                    <div className="flex flex-wrap items-center gap-3 text-xs text-gray-400">
-                      <span className="flex items-center gap-1">
-                        <User className="w-3 h-3 text-gray-400" />
-                        {course.teacher_name || 'مدرس عمومی'}
-                      </span>
-                      {course.classroom_name && (
+                    <div className="flex-1 min-w-0 text-right">
+                      <div className="flex items-center gap-2 mb-1">
+                        <h3 className="font-bold text-gray-900 text-sm sm:text-base truncate group-hover:text-primary-600 transition-colors">
+                          {course.name}
+                        </h3>
+                        {course.code && (
+                          <span className="text-[10px] bg-gray-100 text-gray-600 px-2 py-0.5 rounded-md font-mono">
+                            {course.code}
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-3 text-xs text-gray-400">
                         <span className="flex items-center gap-1">
-                          <MapPin className="w-3 h-3 text-gray-400" />
-                          {course.classroom_name}
+                          <User className="w-3 h-3 text-gray-400" />
+                          {course.teacher_name || 'مدرس عمومی'}
                         </span>
-                      )}
+                        {course.classroom_name && (
+                          <span className="flex items-center gap-1">
+                            <MapPin className="w-3 h-3 text-gray-400" />
+                            {course.classroom_name}
+                          </span>
+                        )}
+                      </div>
                     </div>
-                  </div>
+                  </Link>
 
-                  <div className="w-8 h-8 rounded-full bg-gray-50 group-hover:bg-primary-50 flex items-center justify-center transition-colors shrink-0">
-                    <ArrowLeft className="w-4 h-4 text-gray-400 group-hover:text-primary-600 transition-colors" />
+                  {/* Actions: Delete Button & Arrow */}
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <button
+                      type="button"
+                      onClick={(e) => handleDeleteClick(e, course)}
+                      title="حذف این درس"
+                      className="p-2 rounded-xl text-gray-300 hover:text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+
+                    <Link
+                      href={`/archive/${course.id}`}
+                      className="w-8 h-8 rounded-full bg-gray-50 group-hover:bg-primary-50 flex items-center justify-center transition-colors"
+                    >
+                      <ArrowLeft className="w-4 h-4 text-gray-400 group-hover:text-primary-600 transition-colors" />
+                    </Link>
                   </div>
-                </Link>
+                </div>
               ))}
             </div>
           )}
         </div>
       </main>
+
+      {/* Add Course Modal */}
+      <AddCourseModal
+        isOpen={isAddModalOpen}
+        onClose={() => setIsAddModalOpen(false)}
+        onCourseCreated={handleCourseCreated}
+      />
+
+      {/* Confirm Delete Course Modal */}
+      <ConfirmDeleteModal
+        isOpen={Boolean(courseToDelete)}
+        onClose={() => setCourseToDelete(null)}
+        onConfirm={handleConfirmDelete}
+        title="حذف درس"
+        itemTitle={courseToDelete?.name}
+        description="آیا از حذف این درس مطمئن هستید؟ با حذف درس، تمامی جلسات، ویس‌های کلاسی، جزوات مارکداون و آزمون‌های مربوطه برای همیشه پاک خواهند شد."
+        loading={deleting}
+      />
     </>
   );
 }
-

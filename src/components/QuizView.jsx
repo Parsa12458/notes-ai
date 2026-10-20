@@ -1,26 +1,101 @@
 'use client';
 
-import React, { useState } from 'react';
-import { submitQuiz } from '@/lib/api';
+import React, { useState, useEffect } from 'react';
+import { submitQuiz, generateQuiz } from '@/lib/api';
 import DevignerBadge from '@/components/DevignerBadge';
-import { CheckCircle2, XCircle, Award, RotateCcw, Send, HelpCircle, Loader2 } from 'lucide-react';
+import {
+  CheckCircle2,
+  XCircle,
+  Award,
+  RotateCcw,
+  Send,
+  HelpCircle,
+  Loader2,
+  Sparkles,
+  Plus,
+  AlertCircle,
+} from 'lucide-react';
 
-export default function QuizView({ quizzes = [] }) {
+export default function QuizView({
+  quizzes: initialQuizzes = [],
+  sessionId,
+  onQuizGenerated,
+}) {
+  const [quizzes, setQuizzes] = useState(initialQuizzes);
   const [activeQuizIndex, setActiveQuizIndex] = useState(0);
   const [studentName, setStudentName] = useState('');
   const [selectedAnswers, setSelectedAnswers] = useState({});
   const [submitting, setSubmitting] = useState(false);
+  const [generating, setGenerating] = useState(false);
   const [results, setResults] = useState(null);
   const [error, setError] = useState('');
+  const [generateError, setGenerateError] = useState('');
+
+  useEffect(() => {
+    setQuizzes(initialQuizzes);
+  }, [initialQuizzes]);
+
+  const handleGenerateQuiz = async () => {
+    if (!sessionId) return;
+    setGenerating(true);
+    setGenerateError('');
+    try {
+      const title = `کوییز سنجش یادگیری ${quizzes.length + 1}`;
+      const newQuiz = await generateQuiz(sessionId, title);
+      const updated = [...quizzes, newQuiz];
+      setQuizzes(updated);
+      setActiveQuizIndex(updated.length - 1);
+      handleReset();
+      if (onQuizGenerated) {
+        onQuizGenerated(newQuiz);
+      }
+    } catch (err) {
+      setGenerateError(err?.message || 'خطا در تولید آزمون هوشمند. لطفاً مجدداً امتحان کنید.');
+    } finally {
+      setGenerating(false);
+    }
+  };
 
   if (!quizzes || quizzes.length === 0) {
     return (
-      <div className="bg-white/80 rounded-2xl border border-gray-100 p-10 text-center">
-        <HelpCircle className="w-10 h-10 text-gray-300 mx-auto mb-3" />
-        <h4 className="text-gray-800 font-semibold mb-1">آزمونی برای این جلسه یافت نشد</h4>
-        <p className="text-sm text-gray-400">
-          پس از پردازش نهایی جلسه، آزمون ۴ گزینه‌ای به طور خودکار تولید می‌شود.
-        </p>
+      <div className="bg-white rounded-3xl border border-gray-200/80 p-10 text-center space-y-4">
+        <div className="w-16 h-16 rounded-3xl bg-primary-50 text-primary-600 flex items-center justify-center mx-auto shadow-2xs">
+          <HelpCircle className="w-8 h-8" />
+        </div>
+        <div>
+          <h4 className="text-base font-bold text-gray-900">آزمونی برای این جلسه یافت نشد</h4>
+          <p className="text-xs text-gray-400 mt-1 max-w-sm mx-auto">
+            می‌توانید همین حالا با هوش مصنوعی آزمون ۴ گزینه‌ای استاندارد بر اساس مفاهیم این جلسه تولید کنید.
+          </p>
+        </div>
+
+        {generateError && (
+          <div className="flex items-center justify-center gap-2 p-3 bg-rose-50 border border-rose-200 rounded-2xl text-xs text-rose-700 max-w-md mx-auto">
+            <AlertCircle className="w-4 h-4 shrink-0" />
+            <span>{generateError}</span>
+          </div>
+        )}
+
+        {sessionId && (
+          <button
+            type="button"
+            disabled={generating}
+            onClick={handleGenerateQuiz}
+            className="inline-flex items-center gap-2 px-6 py-3 rounded-2xl bg-primary-600 hover:bg-primary-700 text-white text-xs sm:text-sm font-bold transition-all shadow-xs cursor-pointer disabled:opacity-50"
+          >
+            {generating ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin" />
+                <span>در حال تحلیل جزوه و ساخت سوالات تستی...</span>
+              </>
+            ) : (
+              <>
+                <Sparkles className="w-4 h-4" />
+                <span>تولید آزمون ۴ گزینه‌ای با هوش مصنوعی</span>
+              </>
+            )}
+          </button>
+        )}
       </div>
     );
   }
@@ -99,7 +174,7 @@ export default function QuizView({ quizzes = [] }) {
     <div className="space-y-6">
       {/* Quiz Header & Selector if multiple */}
       <div className="bg-white rounded-2xl border border-gray-200/80 p-5 shadow-sm">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
             <div className="flex items-center gap-2 mb-1">
               <h3 className="text-lg font-bold text-gray-900">{currentQuiz.title}</h3>
@@ -112,28 +187,54 @@ export default function QuizView({ quizzes = [] }) {
             )}
           </div>
 
-          {quizzes.length > 1 && (
-            <div className="flex items-center gap-1.5 bg-gray-100/80 p-1 rounded-xl">
-              {quizzes.map((q, idx) => (
-                <button
-                  key={q.id || idx}
-                  onClick={() => {
-                    setActiveQuizIndex(idx);
-                    handleReset();
-                  }}
-                  className={`px-3 py-1 text-xs font-medium rounded-lg transition-all ${
-                    activeQuizIndex === idx
-                      ? 'bg-white text-primary-700 shadow-sm font-semibold'
-                      : 'text-gray-500 hover:text-gray-800'
-                  }`}
-                >
-                  آزمون {idx + 1}
-                </button>
-              ))}
-            </div>
-          )}
+          <div className="flex items-center gap-2 flex-wrap">
+            {quizzes.length > 1 && (
+              <div className="flex items-center gap-1.5 bg-gray-100/80 p-1 rounded-xl">
+                {quizzes.map((q, idx) => (
+                  <button
+                    key={q.id || idx}
+                    onClick={() => {
+                      setActiveQuizIndex(idx);
+                      handleReset();
+                    }}
+                    className={`px-3 py-1 text-xs font-medium rounded-lg transition-all ${
+                      activeQuizIndex === idx
+                        ? 'bg-white text-primary-700 shadow-sm font-semibold'
+                        : 'text-gray-500 hover:text-gray-800'
+                    }`}
+                  >
+                    آزمون {idx + 1}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {sessionId && (
+              <button
+                type="button"
+                disabled={generating}
+                onClick={handleGenerateQuiz}
+                title="تولید یک آزمون جدید برای این جلسه"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-primary-200 bg-primary-50 hover:bg-primary-100 text-xs font-semibold text-primary-700 transition-colors cursor-pointer disabled:opacity-50"
+              >
+                {generating ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <Plus className="w-3.5 h-3.5" />
+                )}
+                <span>{generating ? 'در حال ساخت...' : 'آزمون جدید'}</span>
+              </button>
+            )}
+          </div>
         </div>
       </div>
+
+      {generateError && (
+        <div className="flex items-center gap-2 p-3 bg-rose-50 border border-rose-200 rounded-2xl text-xs text-rose-700">
+          <AlertCircle className="w-4 h-4 shrink-0" />
+          <span>{generateError}</span>
+        </div>
+      )}
 
       {/* Results Banner if submitted */}
       {results && (
@@ -288,7 +389,7 @@ export default function QuizView({ quizzes = [] }) {
                 value={studentName}
                 onChange={(e) => setStudentName(e.target.value)}
                 placeholder="مثلاً: علی محمدی"
-                className="w-full bg-white border border-gray-200/90 rounded-2xl px-4 py-3 text-xs sm:text-sm placeholder:text-gray-400 focus:outline-none focus:border-primary-400 focus:ring-2 focus:ring-primary-100 transition-all shadow-2xs"
+                className="w-full bg-white border border-gray-200/90 rounded-2xl px-4 py-3 text-xs sm:text-sm placeholder:text-gray-400 focus:outline-none focus:border-primary-400 focus:ring-2 focus:ring-primary-100 transition-all shadow-2xs text-right"
               />
             </div>
 
@@ -321,4 +422,3 @@ export default function QuizView({ quizzes = [] }) {
     </div>
   );
 }
-
