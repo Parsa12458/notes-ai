@@ -27,8 +27,8 @@ import {
  * Provides an Apple/Linear-grade step-by-step live progress experience
  * while AI generates the Markdown note, exam tips, quiz questions, and flashcards.
  * 
- * Eliminates 404 console spam by only querying the note endpoint once
- * `status.has_note === true` or `status.status === 'COMPLETED'`.
+ * Designed with a spacious vertical hierarchy so Persian text NEVER wraps into narrow columns.
+ * Zero font-mono on Persian text to avoid disconnected cursive letter glitches.
  */
 export default function ProcessingPipeline({
   sessionId,
@@ -134,7 +134,6 @@ export default function ProcessingPipeline({
         }
       }
     } catch (err) {
-      // Gentle offline/network blip warning; keep polling without crashing UI
       const msg = err?.message || 'ارتباط با سرور برای لحظاتی قطع شد؛ در حال تلاش مجدد...';
       setErrorMsg(msg);
     } finally {
@@ -165,7 +164,6 @@ export default function ProcessingPipeline({
 
     try {
       await finalizeSession(sessionId);
-      // Resume polling
       pollTimerRef.current = setInterval(() => {
         checkStatus();
       }, 3000);
@@ -186,7 +184,7 @@ export default function ProcessingPipeline({
   const quizDone = Boolean(status?.has_quiz || isCompleted);
 
   // Calculate realistic progress percentage
-  let progressPercentage = 20; // Initial upload done
+  let progressPercentage = 20;
   if (sttDone) {
     progressPercentage = 55;
   } else if (chunksTotal > 0) {
@@ -204,7 +202,7 @@ export default function ProcessingPipeline({
     {
       id: 1,
       title: '۱. ثبت و تجمیع صوت زنگ کلاسی',
-      desc: `${chunksTotal} تکه صوتی کلاسی در فضای ذخیره‌سازی ابری ثبت شد.`,
+      desc: `${chunksTotal} تکه صوتی کلاسی در فضای ابری ثبت شد.`,
       icon: Radio,
       done: true,
       active: false,
@@ -213,7 +211,7 @@ export default function ProcessingPipeline({
       id: 2,
       title: '۲. تبدیل گفتار به متن (Whisper Speech-to-Text)',
       desc: sttDone
-        ? `هر ${chunksTotal} تکه صوتی با دقت بالا پیاده‌سازی شدند.`
+        ? `هر ${chunksTotal} تکه صوتی با دقت بالا رونویسی شدند.`
         : `در حال استخراج دقیق متن گفتگوهای کلاس... (${chunksTranscribed} از ${chunksTotal} تکه)`,
       icon: Cpu,
       done: sttDone,
@@ -221,11 +219,11 @@ export default function ProcessingPipeline({
     },
     {
       id: 3,
-      title: '۳. پایپلاین Map-Reduce و تدوین جزوه ساختاریافته',
+      title: '۳. پایپلاین Map-Reduce و تدوین جزوه استاندارد',
       desc: noteDone
         ? 'جزوه نهایی مارک‌داون با فرمول‌های LaTeX و جداول تحلیلی تدوین شد.'
         : sttDone
-        ? 'هوش مصنوعی در حال حذف حواشی، ساختاربندی علمی، استخراج فرمول‌ها و نگارش خلاصه است...'
+        ? 'هوش مصنوعی در حال حذف حواشی، ساختاربندی علمی، فرمول‌ها و نگارش خلاصه است...'
         : 'در صف پردازش پس از رونویسی صوت...',
       icon: Sparkles,
       done: noteDone,
@@ -233,7 +231,7 @@ export default function ProcessingPipeline({
     },
     {
       id: 4,
-      title: '۴. شکار نکات امتحانی، آزمون ۴ گزینه‌ای و فلش‌کارت',
+      title: '۴. استخراج نکات امتحانی و آزمون ۴ گزینه‌ای و فلش‌کارت',
       desc: quizDone
         ? 'نکات تاکیدی استاد، ۵ سوال تستی سنجش یادگیری و فلش‌کارت‌ها آماده شدند.'
         : noteDone
@@ -248,11 +246,14 @@ export default function ProcessingPipeline({
   const formatElapsed = (sec) => {
     const m = Math.floor(sec / 60);
     const s = sec % 60;
-    return `${m > 0 ? `${m} دقیقه و ` : ''}${s} ثانیه`;
+    if (m > 0) {
+      return `${m} دقیقه و ${s} ثانیه`;
+    }
+    return `${s} ثانیه`;
   };
 
   return (
-    <div className="bg-white rounded-3xl border border-gray-200/90 p-6 sm:p-8 shadow-sm relative overflow-hidden transition-all duration-300">
+    <div className="bg-white rounded-3xl border border-gray-200/90 p-5 sm:p-7 md:p-8 shadow-sm relative overflow-hidden transition-all duration-300">
       {/* Top Animated Shimmering Gradient Accent */}
       <div
         className={`absolute top-0 left-0 right-0 h-1.5 transition-all duration-500 ${
@@ -264,62 +265,31 @@ export default function ProcessingPipeline({
         }`}
       />
 
-      {/* Header Info */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-6 border-b border-gray-100">
-        <div className="flex items-center gap-3">
-          <div
-            className={`w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 transition-colors ${
-              isFailed
-                ? 'bg-rose-50 border border-rose-200 text-rose-600'
-                : isCompleted
-                ? 'bg-emerald-50 border border-emerald-200 text-emerald-600'
-                : 'bg-primary-50 border border-primary-200/80 text-primary-600'
-            }`}
-          >
-            {isFailed ? (
-              <AlertTriangle className="w-6 h-6 text-rose-600" />
-            ) : isCompleted ? (
-              <CheckCircle2 className="w-6 h-6 text-emerald-600" />
-            ) : (
-              <Loader2 className="w-6 h-6 animate-spin text-primary-600" />
-            )}
-          </div>
-
-          <div>
-            <div className="flex items-center gap-2">
-              <h3 className="text-base sm:text-lg font-black text-gray-900">
-                {isFailed
-                  ? 'خطا در پردازش هوش مصنوعی'
-                  : isCompleted
-                  ? 'جزوه و آزمون کلاسی آماده مطالعه شد!'
-                  : 'هوش مصنوعی در حال تولید جزوه و آزمون است...'}
-              </h3>
-              <DevignerBadge
-                variant={isFailed ? 'rose' : isCompleted ? 'emerald' : 'purple'}
-                size="sm"
-                dot
-              >
-                {isFailed
-                  ? 'خطا در پردازش'
-                  : isCompleted
-                  ? 'آماده مطالعه'
-                  : 'در حال پردازش زنده'}
-              </DevignerBadge>
-            </div>
-
-            <p className="text-xs sm:text-sm text-gray-500 mt-1">
-              {isFailed
-                ? 'پردازش صوت به دلیل خطای سرور با وقفه مواجه شد. می‌توانید با دکمه زیر مجدداً تلاش کنید.'
-                : isCompleted
-                ? 'تمامی مراحل به پایان رسید و داده‌ها به صورت خودکار بارگذاری شدند.'
-                : 'نیازی به رفرش صفحه نیست؛ سیستم به صورت زنده گام‌های تولید جزوه را به‌روزرسانی می‌کند.'}
-            </p>
-          </div>
+      {/* ── ROW 1: Dedicated Top Utility Bar (Pills & Timers) ── */}
+      <div className="flex flex-wrap items-center justify-between gap-3 pb-4 border-b border-gray-100">
+        {/* Right Status Pill */}
+        <div className="flex items-center gap-2">
+          {isFailed ? (
+            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-rose-50 border border-rose-200 text-rose-700">
+              <span className="w-2 h-2 rounded-full bg-rose-500" />
+              <span>خطا در پردازش</span>
+            </span>
+          ) : isCompleted ? (
+            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-emerald-50 border border-emerald-200 text-emerald-700">
+              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+              <span>پردازش با موفقیت تکمیل شد</span>
+            </span>
+          ) : (
+            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-purple-50 border border-purple-200 text-purple-700">
+              <span className="w-2 h-2 rounded-full bg-purple-600 animate-ping" />
+              <span>پردازش زنده هوش مصنوعی</span>
+            </span>
+          )}
         </div>
 
-        {/* Live Timer & Manual Check Button */}
-        <div className="flex items-center gap-2 self-start sm:self-center shrink-0">
-          <div className="flex items-center gap-1.5 text-xs font-mono text-gray-500 bg-gray-50 px-3 py-1.5 rounded-xl border border-gray-200">
+        {/* Left Timer & Manual Refresh */}
+        <div className="flex items-center gap-2">
+          <div className="inline-flex items-center gap-1.5 text-xs font-medium text-gray-600 bg-gray-50 px-3 py-1.5 rounded-xl border border-gray-200">
             <Clock className="w-3.5 h-3.5 text-gray-400" />
             <span>زمان سپری‌شده: {formatElapsed(elapsedSeconds)}</span>
           </div>
@@ -329,11 +299,11 @@ export default function ProcessingPipeline({
               type="button"
               onClick={checkStatus}
               disabled={checking}
-              title="استعلام فوری وضعیت از سرور"
+              title="بررسی دستی وضعیت"
               className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl bg-gray-100 hover:bg-gray-200 text-xs font-semibold text-gray-700 transition-colors cursor-pointer disabled:opacity-50"
             >
               <RefreshCw className={`w-3.5 h-3.5 ${checking ? 'animate-spin text-primary-600' : ''}`} />
-              <span>{checking ? 'در حال بررسی...' : 'بررسی مجدد'}</span>
+              <span className="hidden sm:inline">{checking ? 'در حال بررسی...' : 'بررسی مجدد'}</span>
             </button>
           )}
 
@@ -342,20 +312,60 @@ export default function ProcessingPipeline({
               type="button"
               onClick={handleRetry}
               disabled={retrying}
-              className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold transition-all shadow-xs cursor-pointer disabled:opacity-50"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold transition-all shadow-xs cursor-pointer disabled:opacity-50"
             >
               <RefreshCw className={`w-3.5 h-3.5 ${retrying ? 'animate-spin' : ''}`} />
-              <span>{retrying ? 'در حال تلاش مجدد...' : 'تلاش مجدد'}</span>
+              <span>{retrying ? 'تلاش مجدد...' : 'تلاش مجدد'}</span>
             </button>
           )}
         </div>
       </div>
 
-      {/* Progress Bar with Shimmer */}
+      {/* ── ROW 2: Spacious Hero Header (Full Width — Never Narrowly Wrapped!) ── */}
+      <div className="flex items-start gap-4 py-5 border-b border-gray-100">
+        {/* Big AI Icon */}
+        <div
+          className={`w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 shadow-2xs transition-colors ${
+            isFailed
+              ? 'bg-rose-50 border border-rose-200 text-rose-600'
+              : isCompleted
+              ? 'bg-emerald-50 border border-emerald-200 text-emerald-600'
+              : 'bg-gradient-to-br from-primary-50 to-purple-50 border border-primary-200/90 text-primary-600'
+          }`}
+        >
+          {isFailed ? (
+            <AlertTriangle className="w-6 h-6 text-rose-600" />
+          ) : isCompleted ? (
+            <CheckCircle2 className="w-6 h-6 text-emerald-600" />
+          ) : (
+            <Loader2 className="w-6 h-6 animate-spin text-primary-600" />
+          )}
+        </div>
+
+        {/* Title & Description with 100% available width */}
+        <div className="flex-1 min-w-0">
+          <h3 className="text-base sm:text-lg font-black text-gray-900 tracking-tight leading-snug">
+            {isFailed
+              ? 'خطا در پردازش صوت و تولید جزوه'
+              : isCompleted
+              ? 'جزوه ساختاریافته و آزمون کلاسی آماده شد!'
+              : 'هوش مصنوعی در حال تولید جزوه و آزمون کلاسی است...'}
+          </h3>
+          <p className="text-xs sm:text-sm text-gray-500 mt-1 leading-relaxed">
+            {isFailed
+              ? 'پردازش صوت به دلیل خطای سرور با وقفه مواجه شد. می‌توانید با دکمه تلاش مجدد، پردازش را از سر بگیرید.'
+              : isCompleted
+              ? 'تمامی مراحل با موفقیت به پایان رسید و جزوه با فرمول‌های علمی و آزمون تستی آماده مطالعه است.'
+              : 'سیستم به صورت خودکار گام‌های رونویسی و نگارش جزوه را انجام می‌دهد؛ نیازی به رفرش صفحه ندارید.'}
+          </p>
+        </div>
+      </div>
+
+      {/* ── ROW 3: Progress Bar & Percentage ── */}
       <div className="py-5">
         <div className="flex items-center justify-between text-xs font-bold mb-2">
-          <span className="text-gray-600">میزان پیشرفت پایپلاین هوش مصنوعی</span>
-          <span className="font-mono text-primary-700 bg-primary-50 border border-primary-200/60 px-2 py-0.5 rounded-md">
+          <span className="text-gray-700">میزان پیشرفت پایپلاین هوش مصنوعی</span>
+          <span className="text-primary-700 bg-primary-50 border border-primary-200/60 px-2.5 py-0.5 rounded-lg text-xs font-bold">
             {progressPercentage}٪
           </span>
         </div>
@@ -371,7 +381,6 @@ export default function ProcessingPipeline({
             }`}
             style={{ width: `${progressPercentage}%` }}
           >
-            {/* Shimmer animation bar */}
             {!isCompleted && !isFailed && (
               <div className="absolute inset-0 bg-white/30 animate-[shimmer_2s_infinite] -skew-x-12" />
             )}
@@ -386,14 +395,14 @@ export default function ProcessingPipeline({
         )}
       </div>
 
-      {/* Stepper Stages (4 Detailed Steps) */}
-      <div className="space-y-3 pb-6">
+      {/* ── ROW 4: Stepper Stages (4 Clean Horizontal Cards) ── */}
+      <div className="space-y-3 pb-5">
         {stages.map((stage) => {
           const Icon = stage.icon;
           return (
             <div
               key={stage.id}
-              className={`flex items-start gap-4 p-4 rounded-2xl transition-all duration-300 ${
+              className={`flex items-start gap-3.5 p-3.5 sm:p-4 rounded-2xl transition-all duration-300 ${
                 stage.done
                   ? 'bg-emerald-50/40 border border-emerald-100/90'
                   : stage.active
@@ -402,7 +411,7 @@ export default function ProcessingPipeline({
               }`}
             >
               <div
-                className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 transition-colors ${
+                className={`w-9 h-9 sm:w-10 sm:h-10 rounded-xl flex items-center justify-center shrink-0 transition-colors ${
                   stage.done
                     ? 'bg-emerald-600 text-white shadow-2xs'
                     : stage.active
@@ -420,10 +429,10 @@ export default function ProcessingPipeline({
               </div>
 
               <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center justify-between gap-1">
                   <h4 className="text-xs sm:text-sm font-bold text-gray-900">{stage.title}</h4>
                   {stage.active && (
-                    <span className="text-[10px] font-bold text-primary-700 bg-primary-100/80 px-2 py-0.5 rounded-full animate-pulse">
+                    <span className="text-[10px] font-bold text-primary-700 bg-primary-100 px-2 py-0.5 rounded-full animate-pulse">
                       در حال پردازش...
                     </span>
                   )}
@@ -433,7 +442,7 @@ export default function ProcessingPipeline({
                     </span>
                   )}
                 </div>
-                <p className="text-xs text-gray-500 mt-0.5 leading-relaxed">{stage.desc}</p>
+                <p className="text-xs text-gray-500 mt-1 leading-relaxed">{stage.desc}</p>
               </div>
             </div>
           );
@@ -448,7 +457,7 @@ export default function ProcessingPipeline({
         </div>
       )}
 
-      {/* Live Activity Feed (Expandable Accordion) */}
+      {/* ── ROW 5: Live Activity Feed (Expandable Drawer) ── */}
       <div className="border-t border-gray-100 pt-4">
         <button
           type="button"
@@ -463,10 +472,10 @@ export default function ProcessingPipeline({
         </button>
 
         {showLogs && (
-          <div className="mt-3 bg-gray-900 text-gray-200 rounded-2xl p-4 font-mono text-[11px] space-y-2 max-h-48 overflow-y-auto" dir="ltr">
+          <div className="mt-3 bg-gray-900 text-gray-200 rounded-2xl p-4 text-[11px] space-y-2 max-h-48 overflow-y-auto">
             {activityLogs.map((log, i) => (
-              <div key={i} className="flex items-start gap-2">
-                <span className="text-gray-500 select-none">[{log.time}]</span>
+              <div key={i} className="flex items-start gap-2.5">
+                <span className="font-mono text-gray-500 select-none text-[10px] pt-0.5">[{log.time}]</span>
                 <span
                   className={
                     log.level === 'error'
@@ -475,7 +484,6 @@ export default function ProcessingPipeline({
                       ? 'text-amber-400'
                       : 'text-emerald-400'
                   }
-                  dir="rtl"
                 >
                   {log.text}
                 </span>
@@ -485,9 +493,9 @@ export default function ProcessingPipeline({
         )}
       </div>
 
-      {/* Bottom Completion Action */}
+      {/* ── ROW 6: Bottom Completion Celebration Card ── */}
       {isCompleted && (
-        <div className="mt-5 pt-4 border-t border-emerald-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-emerald-50/60 p-4 rounded-2xl border border-emerald-200/80">
+        <div className="mt-5 pt-4 border-t border-emerald-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-emerald-50/70 p-4 rounded-2xl border border-emerald-200">
           <div className="flex items-center gap-2 text-xs font-bold text-emerald-800">
             <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
             <span>تمام مراحل ساخت جزوه، نکات امتحانی و کوئیز تستی با موفقیت به پایان رسید.</span>

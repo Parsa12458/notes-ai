@@ -238,7 +238,7 @@ export default function RecordPage() {
     <>
       <Header />
       <main className="pt-16 pb-12 min-h-dvh px-4 sm:px-6">
-        <div className="max-w-xl mx-auto pt-6 page-transition">
+        <div className={`${step === 'done' ? 'max-w-3xl' : 'max-w-xl'} mx-auto pt-6 page-transition`}>
           {/* STEP 1: SETUP */}
           {step === 'setup' && (
             <div className="space-y-6">
