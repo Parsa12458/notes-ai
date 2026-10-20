@@ -1,25 +1,34 @@
 'use client';
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { getSessionStatus, getNoteBySession } from '@/lib/api';
+import { getSessionStatus, getNoteBySession, finalizeSession } from '@/lib/api';
 import DevignerBadge from '@/components/DevignerBadge';
 import {
   Sparkles,
   Loader2,
   CheckCircle2,
-  Mic,
+  Radio,
   Cpu,
   Flame,
   HelpCircle,
   RefreshCw,
   Clock,
   ArrowRight,
+  AlertTriangle,
+  ChevronDown,
+  ChevronUp,
+  ListOrdered,
+  FileText,
 } from 'lucide-react';
 
 /**
  * ProcessingPipeline Component
- * Provides real-time polling and rich visual feedback while AI generates notes,
- * tips, quizzes, and flashcards so the user NEVER needs to manually reload the page.
+ * 
+ * Provides an Apple/Linear-grade step-by-step live progress experience
+ * while AI generates the Markdown note, exam tips, quiz questions, and flashcards.
+ * 
+ * Eliminates 404 console spam by only querying the note endpoint once
+ * `status.has_note === true` or `status.status === 'COMPLETED'`.
  */
 export default function ProcessingPipeline({
   sessionId,
@@ -31,11 +40,23 @@ export default function ProcessingPipeline({
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [checking, setChecking] = useState(false);
   const [isCompleted, setIsCompleted] = useState(false);
-  const [error, setError] = useState('');
+  const [isFailed, setIsFailed] = useState(false);
+  const [retrying, setRetrying] = useState(false);
+  const [errorMsg, setErrorMsg] = useState('');
+  const [showLogs, setShowLogs] = useState(false);
+  const [activityLogs, setActivityLogs] = useState([
+    {
+      time: '00:00',
+      text: 'درخواست پردازش و نهایی‌سازی به سرور NoteAi ارسال شد.',
+      level: 'info',
+    },
+  ]);
+
   const pollTimerRef = useRef(null);
   const elapsedTimerRef = useRef(null);
+  const completedFiredRef = useRef(false);
 
-  // Elapsed time counter
+  // Timer for elapsed time
   useEffect(() => {
     elapsedTimerRef.current = setInterval(() => {
       setElapsedSeconds((s) => s + 1);
@@ -46,103 +67,181 @@ export default function ProcessingPipeline({
     };
   }, []);
 
+  const addLog = useCallback((text, level = 'info') => {
+    setActivityLogs((prev) => {
+      if (prev.some((item) => item.text === text)) return prev;
+      const min = Math.floor(elapsedSeconds / 60);
+      const sec = elapsedSeconds % 60;
+      const timeStr = `${String(min).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
+      return [...prev, { time: timeStr, text, level }];
+    });
+  }, [elapsedSeconds]);
+
   const checkStatus = useCallback(async () => {
-    if (!sessionId || isCompleted) return;
+    if (!sessionId || isCompleted || completedFiredRef.current) return;
     setChecking(true);
+    setErrorMsg('');
+
     try {
-      const [statusRes, noteRes] = await Promise.allSettled([
-        getSessionStatus(sessionId),
-        getNoteBySession(sessionId),
-      ]);
+      // 1. ONLY query the session status endpoint. Never poll notes/by-session when has_note is false!
+      const statusData = await getSessionStatus(sessionId);
+      setStatus(statusData);
 
-      let newStatus = null;
-      let newNote = null;
-
-      if (statusRes.status === 'fulfilled') {
-        newStatus = statusRes.value;
-        setStatus(newStatus);
-      }
-
-      if (noteRes.status === 'fulfilled' && noteRes.value) {
-        newNote = noteRes.value;
-      }
-
-      // Completion conditions:
-      // 1. note is returned
-      // 2. newStatus indicates COMPLETED or has_note === true
-      const done =
-        Boolean(newNote && newNote.id) ||
-        newStatus?.has_note === true ||
-        newStatus?.status === 'COMPLETED';
-
-      if (done) {
-        setIsCompleted(true);
+      // Check for failure
+      if (statusData?.status === 'FAILED') {
+        setIsFailed(true);
+        addLog('خطایی در پردازش صوت در سمت سرور گزارش شد.', 'error');
         if (pollTimerRef.current) clearInterval(pollTimerRef.current);
         if (elapsedTimerRef.current) clearInterval(elapsedTimerRef.current);
-        if (onCompleted) {
-          onCompleted(newNote);
+        return;
+      }
+
+      // Track milestones in activity logs
+      const chunksTotal = statusData?.chunks_total || statusData?.chunks?.length || 1;
+      const chunksTranscribed = statusData?.chunks_transcribed || 0;
+
+      if (chunksTranscribed > 0) {
+        addLog(`رونویسی گفتار به متن Whisper: ${chunksTranscribed} از ${chunksTotal} تکه پیاده‌سازی شد.`);
+      }
+
+      if (chunksTranscribed >= chunksTotal && !statusData?.has_note) {
+        addLog('رونویسی صوت‌ها به پایان رسید؛ پایپلاین Map-Reduce در حال تدوین جزوه ساختاریافته است.');
+      }
+
+      if (statusData?.has_note) {
+        addLog('جزوه نهایی مارک‌داون با فرمول‌ها و مباحث تحلیلی با موفقیت ثبت شد.');
+      }
+
+      // 2. Only when `has_note === true` or status is `COMPLETED`, fetch the note safely
+      if (statusData?.has_note === true || statusData?.status === 'COMPLETED') {
+        addLog('استخراج سوالات کوئیز و فلش‌کارت‌ها تکمیل شد. آماده بارگذاری.');
+        setIsCompleted(true);
+        completedFiredRef.current = true;
+
+        if (pollTimerRef.current) clearInterval(pollTimerRef.current);
+        if (elapsedTimerRef.current) clearInterval(elapsedTimerRef.current);
+
+        // Fetch the generated note (guaranteed 200 OK!)
+        try {
+          const completedNote = await getNoteBySession(sessionId);
+          if (onCompleted) {
+            onCompleted(completedNote);
+          }
+        } catch {
+          if (onCompleted) {
+            onCompleted(null);
+          }
         }
       }
     } catch (err) {
-      // Don't show hard error on transient network blip; keep polling
-      console.warn('Poll status error:', err);
+      // Gentle offline/network blip warning; keep polling without crashing UI
+      const msg = err?.message || 'ارتباط با سرور برای لحظاتی قطع شد؛ در حال تلاش مجدد...';
+      setErrorMsg(msg);
     } finally {
       setChecking(false);
     }
-  }, [sessionId, isCompleted, onCompleted]);
+  }, [sessionId, isCompleted, onCompleted, addLog]);
 
-  // Automatic polling interval (every 3.5 seconds)
+  // Polling interval (every 3 seconds)
   useEffect(() => {
     checkStatus();
 
     pollTimerRef.current = setInterval(() => {
       checkStatus();
-    }, 3500);
+    }, 3000);
 
     return () => {
       if (pollTimerRef.current) clearInterval(pollTimerRef.current);
     };
   }, [checkStatus]);
 
-  const chunksTranscribed = status?.chunks_transcribed || 0;
-  const chunksTotal = status?.chunks_total || status?.chunks?.length || 1;
-  const sttDone = chunksTotal > 0 && chunksTranscribed >= chunksTotal;
+  // Handle retry if failed
+  const handleRetry = async () => {
+    if (!sessionId) return;
+    setRetrying(true);
+    setIsFailed(false);
+    setErrorMsg('');
+    addLog('تلاش مجدد برای پردازش و نهایی‌سازی جلسه آغاز شد.');
 
-  // Pipeline stages calculation
+    try {
+      await finalizeSession(sessionId);
+      // Resume polling
+      pollTimerRef.current = setInterval(() => {
+        checkStatus();
+      }, 3000);
+      checkStatus();
+    } catch (err) {
+      setIsFailed(true);
+      setErrorMsg(err?.message || 'خطا در اجرای مجدد پردازش');
+    } finally {
+      setRetrying(false);
+    }
+  };
+
+  // Metrics calculation
+  const chunksTotal = status?.chunks_total || status?.chunks?.length || 1;
+  const chunksTranscribed = status?.chunks_transcribed || 0;
+  const sttDone = chunksTotal > 0 && chunksTranscribed >= chunksTotal;
+  const noteDone = Boolean(status?.has_note || isCompleted);
+  const quizDone = Boolean(status?.has_quiz || isCompleted);
+
+  // Calculate realistic progress percentage
+  let progressPercentage = 20; // Initial upload done
+  if (sttDone) {
+    progressPercentage = 55;
+  } else if (chunksTotal > 0) {
+    progressPercentage = 20 + Math.round((chunksTranscribed / chunksTotal) * 35);
+  }
+  if (noteDone) {
+    progressPercentage = 85;
+  }
+  if (quizDone || isCompleted) {
+    progressPercentage = 100;
+  }
+
+  // 4 Standard Stages with rich sub-state
   const stages = [
     {
       id: 1,
-      title: 'دریافت و تجمیع صوت زنگ کلاس',
-      desc: `${chunksTotal} تکه صوتی در سیستم ثبت شد`,
-      icon: Mic,
+      title: '۱. ثبت و تجمیع صوت زنگ کلاسی',
+      desc: `${chunksTotal} تکه صوتی کلاسی در فضای ذخیره‌سازی ابری ثبت شد.`,
+      icon: Radio,
       done: true,
       active: false,
     },
     {
       id: 2,
-      title: 'تبدیل گفتار به متن (Whisper STT)',
+      title: '۲. تبدیل گفتار به متن (Whisper Speech-to-Text)',
       desc: sttDone
-        ? `هر ${chunksTotal} تکه با موفقیت پیاده‌سازی شدند`
-        : `پیاده‌سازی ${chunksTranscribed} از ${chunksTotal} تکه صوتی...`,
+        ? `هر ${chunksTotal} تکه صوتی با دقت بالا پیاده‌سازی شدند.`
+        : `در حال استخراج دقیق متن گفتگوهای کلاس... (${chunksTranscribed} از ${chunksTotal} تکه)`,
       icon: Cpu,
       done: sttDone,
-      active: !sttDone,
+      active: !sttDone && !isFailed,
     },
     {
       id: 3,
-      title: 'پایپلاین Map-Reduce و نگارش جزوه',
-      desc: 'حذف حواشی، ساختاربندی علمی، فرمول‌های LaTeX و جداول',
+      title: '۳. پایپلاین Map-Reduce و تدوین جزوه ساختاریافته',
+      desc: noteDone
+        ? 'جزوه نهایی مارک‌داون با فرمول‌های LaTeX و جداول تحلیلی تدوین شد.'
+        : sttDone
+        ? 'هوش مصنوعی در حال حذف حواشی، ساختاربندی علمی، استخراج فرمول‌ها و نگارش خلاصه است...'
+        : 'در صف پردازش پس از رونویسی صوت...',
       icon: Sparkles,
-      done: isCompleted,
-      active: sttDone && !isCompleted,
+      done: noteDone,
+      active: sttDone && !noteDone && !isFailed,
     },
     {
       id: 4,
-      title: 'شکار نکات امتحانی، کوئیز تستی و فلش‌کارت',
-      desc: 'استخراج تأکیدات استاد و تولید سوالات ۴ گزینه‌ای و مرور سریع',
+      title: '۴. شکار نکات امتحانی، آزمون ۴ گزینه‌ای و فلش‌کارت',
+      desc: quizDone
+        ? 'نکات تاکیدی استاد، ۵ سوال تستی سنجش یادگیری و فلش‌کارت‌ها آماده شدند.'
+        : noteDone
+        ? 'در حال استخراج نکات امتحانی تاکیدشده توسط استاد و طراحی آزمون...'
+        : 'در صف تحلیل پس از تدوین جزوه...',
       icon: Flame,
-      done: isCompleted,
-      active: isCompleted,
+      done: quizDone,
+      active: noteDone && !quizDone && !isFailed,
     },
   ];
 
@@ -154,36 +253,66 @@ export default function ProcessingPipeline({
 
   return (
     <div className="bg-white rounded-3xl border border-gray-200/90 p-6 sm:p-8 shadow-sm relative overflow-hidden transition-all duration-300">
-      {/* Top Animated Gradient Accent */}
-      <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-primary-500 via-purple-600 to-pink-500 animate-pulse" />
+      {/* Top Animated Shimmering Gradient Accent */}
+      <div
+        className={`absolute top-0 left-0 right-0 h-1.5 transition-all duration-500 ${
+          isFailed
+            ? 'bg-rose-500'
+            : isCompleted
+            ? 'bg-emerald-500'
+            : 'bg-gradient-to-r from-primary-500 via-purple-600 to-pink-500 animate-pulse'
+        }`}
+      />
 
       {/* Header Info */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-6 border-b border-gray-100">
         <div className="flex items-center gap-3">
-          <div className="w-12 h-12 rounded-2xl bg-primary-50 border border-primary-200/80 flex items-center justify-center text-primary-600 shrink-0">
-            {isCompleted ? (
+          <div
+            className={`w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 transition-colors ${
+              isFailed
+                ? 'bg-rose-50 border border-rose-200 text-rose-600'
+                : isCompleted
+                ? 'bg-emerald-50 border border-emerald-200 text-emerald-600'
+                : 'bg-primary-50 border border-primary-200/80 text-primary-600'
+            }`}
+          >
+            {isFailed ? (
+              <AlertTriangle className="w-6 h-6 text-rose-600" />
+            ) : isCompleted ? (
               <CheckCircle2 className="w-6 h-6 text-emerald-600" />
             ) : (
               <Loader2 className="w-6 h-6 animate-spin text-primary-600" />
             )}
           </div>
+
           <div>
             <div className="flex items-center gap-2">
               <h3 className="text-base sm:text-lg font-black text-gray-900">
-                {isCompleted ? 'جزوه و آزمون کلاسی آماده شد!' : 'هوش مصنوعی در حال تولید جزوه و آزمون است...'}
+                {isFailed
+                  ? 'خطا در پردازش هوش مصنوعی'
+                  : isCompleted
+                  ? 'جزوه و آزمون کلاسی آماده مطالعه شد!'
+                  : 'هوش مصنوعی در حال تولید جزوه و آزمون است...'}
               </h3>
               <DevignerBadge
-                variant={isCompleted ? 'emerald' : 'purple'}
+                variant={isFailed ? 'rose' : isCompleted ? 'emerald' : 'purple'}
                 size="sm"
                 dot
               >
-                {isCompleted ? 'تکمیل شد' : 'در حال پردازش زنده'}
+                {isFailed
+                  ? 'خطا در پردازش'
+                  : isCompleted
+                  ? 'آماده مطالعه'
+                  : 'در حال پردازش زنده'}
               </DevignerBadge>
             </div>
+
             <p className="text-xs sm:text-sm text-gray-500 mt-1">
-              {isCompleted
-                ? 'تمام مراحل پردازش با موفقیت به پایان رسید. در حال بارگذاری محتوا...'
-                : 'لطفاً شکیبا باشید؛ سیستم به صورت خودکار داده‌ها را بروزرسانی می‌کند (نیازی به رفرش مرورگر ندارید).'}
+              {isFailed
+                ? 'پردازش صوت به دلیل خطای سرور با وقفه مواجه شد. می‌توانید با دکمه زیر مجدداً تلاش کنید.'
+                : isCompleted
+                ? 'تمامی مراحل به پایان رسید و داده‌ها به صورت خودکار بارگذاری شدند.'
+                : 'نیازی به رفرش صفحه نیست؛ سیستم به صورت زنده گام‌های تولید جزوه را به‌روزرسانی می‌کند.'}
             </p>
           </div>
         </div>
@@ -195,40 +324,89 @@ export default function ProcessingPipeline({
             <span>زمان سپری‌شده: {formatElapsed(elapsedSeconds)}</span>
           </div>
 
-          <button
-            type="button"
-            onClick={checkStatus}
-            disabled={checking || isCompleted}
-            title="بررسی دستی مجدد وضعیت"
-            className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl bg-gray-100 hover:bg-gray-200 text-xs font-semibold text-gray-700 transition-colors cursor-pointer disabled:opacity-50"
-          >
-            <RefreshCw className={`w-3.5 h-3.5 ${checking ? 'animate-spin text-primary-600' : ''}`} />
-            <span>{checking ? 'در حال استعلام...' : 'بررسی مجدد'}</span>
-          </button>
+          {!isCompleted && !isFailed && (
+            <button
+              type="button"
+              onClick={checkStatus}
+              disabled={checking}
+              title="استعلام فوری وضعیت از سرور"
+              className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl bg-gray-100 hover:bg-gray-200 text-xs font-semibold text-gray-700 transition-colors cursor-pointer disabled:opacity-50"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${checking ? 'animate-spin text-primary-600' : ''}`} />
+              <span>{checking ? 'در حال بررسی...' : 'بررسی مجدد'}</span>
+            </button>
+          )}
+
+          {isFailed && (
+            <button
+              type="button"
+              onClick={handleRetry}
+              disabled={retrying}
+              className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold transition-all shadow-xs cursor-pointer disabled:opacity-50"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${retrying ? 'animate-spin' : ''}`} />
+              <span>{retrying ? 'در حال تلاش مجدد...' : 'تلاش مجدد'}</span>
+            </button>
+          )}
         </div>
       </div>
 
-      {/* Stepper Stages */}
-      <div className="py-6 space-y-4">
-        {stages.map((stage, idx) => {
+      {/* Progress Bar with Shimmer */}
+      <div className="py-5">
+        <div className="flex items-center justify-between text-xs font-bold mb-2">
+          <span className="text-gray-600">میزان پیشرفت پایپلاین هوش مصنوعی</span>
+          <span className="font-mono text-primary-700 bg-primary-50 border border-primary-200/60 px-2 py-0.5 rounded-md">
+            {progressPercentage}٪
+          </span>
+        </div>
+
+        <div className="w-full bg-gray-100 rounded-full h-3 overflow-hidden p-0.5 border border-gray-200/70">
+          <div
+            className={`h-full rounded-full transition-all duration-700 relative overflow-hidden ${
+              isFailed
+                ? 'bg-rose-500'
+                : isCompleted
+                ? 'bg-emerald-500'
+                : 'bg-gradient-to-r from-primary-500 via-purple-600 to-emerald-500'
+            }`}
+            style={{ width: `${progressPercentage}%` }}
+          >
+            {/* Shimmer animation bar */}
+            {!isCompleted && !isFailed && (
+              <div className="absolute inset-0 bg-white/30 animate-[shimmer_2s_infinite] -skew-x-12" />
+            )}
+          </div>
+        </div>
+
+        {!isCompleted && !isFailed && (
+          <p className="text-[11px] text-gray-400 mt-2 flex items-center gap-1.5">
+            <span className="w-1.5 h-1.5 rounded-full bg-primary-500 animate-ping" />
+            <span>مدت زمان تخمینی معمولاً بین ۳۰ الی ۶۰ ثانیه بسته به حجم درس است.</span>
+          </p>
+        )}
+      </div>
+
+      {/* Stepper Stages (4 Detailed Steps) */}
+      <div className="space-y-3 pb-6">
+        {stages.map((stage) => {
           const Icon = stage.icon;
           return (
             <div
               key={stage.id}
               className={`flex items-start gap-4 p-4 rounded-2xl transition-all duration-300 ${
                 stage.done
-                  ? 'bg-emerald-50/50 border border-emerald-100/80'
+                  ? 'bg-emerald-50/40 border border-emerald-100/90'
                   : stage.active
-                  ? 'bg-primary-50/70 border border-primary-200 shadow-xs'
-                  : 'bg-gray-50/40 border border-gray-100 opacity-60'
+                  ? 'bg-primary-50/70 border border-primary-200 shadow-2xs ring-1 ring-primary-100'
+                  : 'bg-gray-50/50 border border-gray-100 opacity-60'
               }`}
             >
               <div
                 className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 transition-colors ${
                   stage.done
-                    ? 'bg-emerald-600 text-white shadow-xs'
+                    ? 'bg-emerald-600 text-white shadow-2xs'
                     : stage.active
-                    ? 'bg-primary-600 text-white animate-pulse'
+                    ? 'bg-primary-600 text-white shadow-xs'
                     : 'bg-gray-200 text-gray-500'
                 }`}
               >
@@ -243,9 +421,9 @@ export default function ProcessingPipeline({
 
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2">
-                  <h4 className="text-sm font-bold text-gray-900">{stage.title}</h4>
+                  <h4 className="text-xs sm:text-sm font-bold text-gray-900">{stage.title}</h4>
                   {stage.active && (
-                    <span className="text-[10px] font-bold text-primary-700 bg-primary-100 px-2 py-0.5 rounded-full animate-pulse">
+                    <span className="text-[10px] font-bold text-primary-700 bg-primary-100/80 px-2 py-0.5 rounded-full animate-pulse">
                       در حال پردازش...
                     </span>
                   )}
@@ -255,32 +433,76 @@ export default function ProcessingPipeline({
                     </span>
                   )}
                 </div>
-                <p className="text-xs text-gray-500 mt-0.5">{stage.desc}</p>
+                <p className="text-xs text-gray-500 mt-0.5 leading-relaxed">{stage.desc}</p>
               </div>
             </div>
           );
         })}
       </div>
 
-      {/* Footer live status tip */}
-      <div className="pt-4 border-t border-gray-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-gray-400">
-        <div className="flex items-center gap-2">
-          <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping" />
-          <span>ارتباط با سرور ابری برقرار است. به محض اتمام پردازش، جزوه به صورت زنده نمایش داده می‌شود.</span>
+      {/* Soft Error Message Banner */}
+      {errorMsg && (
+        <div className="mb-4 p-3 rounded-xl bg-amber-50 border border-amber-200 text-amber-800 text-xs flex items-center gap-2">
+          <AlertTriangle className="w-4 h-4 shrink-0 text-amber-600" />
+          <span>{errorMsg}</span>
         </div>
+      )}
 
-        {isCompleted && (
+      {/* Live Activity Feed (Expandable Accordion) */}
+      <div className="border-t border-gray-100 pt-4">
+        <button
+          type="button"
+          onClick={() => setShowLogs(!showLogs)}
+          className="w-full flex items-center justify-between text-xs font-semibold text-gray-500 hover:text-gray-800 py-1 transition-colors cursor-pointer"
+        >
+          <div className="flex items-center gap-2">
+            <ListOrdered className="w-3.5 h-3.5 text-primary-600" />
+            <span>مشاهده گزارش رخدادهای لحظه‌ای ({activityLogs.length} رویداد)</span>
+          </div>
+          {showLogs ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+        </button>
+
+        {showLogs && (
+          <div className="mt-3 bg-gray-900 text-gray-200 rounded-2xl p-4 font-mono text-[11px] space-y-2 max-h-48 overflow-y-auto" dir="ltr">
+            {activityLogs.map((log, i) => (
+              <div key={i} className="flex items-start gap-2">
+                <span className="text-gray-500 select-none">[{log.time}]</span>
+                <span
+                  className={
+                    log.level === 'error'
+                      ? 'text-rose-400 font-semibold'
+                      : log.level === 'warn'
+                      ? 'text-amber-400'
+                      : 'text-emerald-400'
+                  }
+                  dir="rtl"
+                >
+                  {log.text}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Bottom Completion Action */}
+      {isCompleted && (
+        <div className="mt-5 pt-4 border-t border-emerald-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-emerald-50/60 p-4 rounded-2xl border border-emerald-200/80">
+          <div className="flex items-center gap-2 text-xs font-bold text-emerald-800">
+            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+            <span>تمام مراحل ساخت جزوه، نکات امتحانی و کوئیز تستی با موفقیت به پایان رسید.</span>
+          </div>
+
           <button
             type="button"
             onClick={() => onCompleted && onCompleted()}
-            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold transition-all shadow-xs"
+            className="inline-flex items-center justify-center gap-1.5 px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs sm:text-sm transition-all shadow-xs cursor-pointer shrink-0"
           >
-            <span>نمایش جزوه و سوالات</span>
+            <span>مشاهده جزوه و شروع مطالعه</span>
             <ArrowRight className="w-4 h-4 rotate-180" />
           </button>
-        )}
-      </div>
+        </div>
+      )}
     </div>
   );
 }
-

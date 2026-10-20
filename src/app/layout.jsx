@@ -1,5 +1,4 @@
 import './globals.css';
-import LiveLogDrawer from '@/components/LiveLogDrawer';
 
 export const metadata = {
   title: 'Notes AI — جزوه هوشمند',
@@ -17,9 +16,7 @@ export default function RootLayout({ children }) {
       </head>
       <body className="font-sans bg-gray-50/50 min-h-dvh">
         {children}
-        <LiveLogDrawer />
       </body>
     </html>
   );
 }
-

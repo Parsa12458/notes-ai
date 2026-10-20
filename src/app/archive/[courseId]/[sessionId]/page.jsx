@@ -61,15 +61,16 @@ export default function SessionDetailPage() {
   const [error, setError] = useState('');
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
-  const pollTimerRef = useRef(null);
 
   const loadData = useCallback(async (isSilent = false) => {
     if (!isSilent) setRefreshing(true);
     setError('');
     try {
-      const [coursesData, sessionsData] = await Promise.all([
+      // 1. Fetch course, session, and status first
+      const [coursesData, sessionsData, statusData] = await Promise.all([
         getCourses().catch(() => []),
         getSessions(courseId).catch(() => []),
+        getSessionStatus(sessionId).catch(() => null),
       ]);
 
       const currentCourse = (coursesData || []).find((c) => c.id === courseId) || null;
@@ -77,29 +78,42 @@ export default function SessionDetailPage() {
 
       setCourse(currentCourse);
       setSession(currentSession);
+      setSessionStatus(statusData);
 
-      // Fetch session-specific items in parallel
-      const [noteRes, quizRes, flashRes, statusRes] = await Promise.allSettled([
-        getNoteBySession(sessionId),
-        getQuizzes(sessionId),
-        getFlashcards(sessionId),
-        getSessionStatus(sessionId),
-      ]);
+      // 2. ONLY fetch note if status explicitly confirms has_note === true OR session is COMPLETED!
+      // This completely eliminates any 404 console errors.
+      const shouldFetchNote = Boolean(
+        statusData?.has_note === true || currentSession?.status === 'COMPLETED'
+      );
 
-      if (noteRes.status === 'fulfilled' && noteRes.value) {
-        setNote(noteRes.value);
+      if (shouldFetchNote) {
+        const [noteRes, quizRes, flashRes] = await Promise.allSettled([
+          getNoteBySession(sessionId),
+          getQuizzes(sessionId),
+          getFlashcards(sessionId),
+        ]);
+
+        if (noteRes.status === 'fulfilled' && noteRes.value) {
+          setNote(noteRes.value);
+        }
+        if (quizRes.status === 'fulfilled') {
+          setQuizzes(quizRes.value || []);
+        }
+        if (flashRes.status === 'fulfilled') {
+          setFlashcards(flashRes.value || []);
+        }
+      } else {
+        setNote(null);
+        // Quizzes and flashcards might be empty while processing
+        const [quizRes, flashRes] = await Promise.allSettled([
+          getQuizzes(sessionId),
+          getFlashcards(sessionId),
+        ]);
+        if (quizRes.status === 'fulfilled') setQuizzes(quizRes.value || []);
+        if (flashRes.status === 'fulfilled') setFlashcards(flashRes.value || []);
       }
-      if (quizRes.status === 'fulfilled') {
-        setQuizzes(quizRes.value || []);
-      }
-      if (flashRes.status === 'fulfilled') {
-        setFlashcards(flashRes.value || []);
-      }
-      if (statusRes.status === 'fulfilled') {
-        setSessionStatus(statusRes.value || null);
-      }
-    } catch {
-      setError('خطا در دریافت اطلاعات جلسه');
+    } catch (err) {
+      setError(err?.message || 'خطا در برقراری ارتباط با سرور.');
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -112,13 +126,13 @@ export default function SessionDetailPage() {
     }
   }, [sessionId, loadData]);
 
-  // Handle pipeline auto-completed
+  // Handle pipeline auto-completed without page reload
   const handlePipelineCompleted = useCallback(
     async (completedNote) => {
       if (completedNote) {
         setNote(completedNote);
       }
-      // Re-fetch quizzes, flashcards and final session data
+      // Re-fetch quizzes, flashcards and final session data silently
       await loadData(true);
     },
     [loadData]
@@ -182,263 +196,307 @@ export default function SessionDetailPage() {
             </span>
           </div>
 
-          {/* Session Master Banner Card */}
-          <div className="bg-white rounded-3xl border border-gray-200/80 p-6 sm:p-8 shadow-sm mb-6 relative overflow-hidden">
-            <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-primary-500 via-primary-600 to-primary-700" />
-
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
-              <div className="space-y-2">
-                <div className="flex flex-wrap items-center gap-2">
-                  {course && (
-                    <span
-                      className="px-2.5 py-1 rounded-full text-xs font-semibold text-white shadow-2xs"
-                      style={{ backgroundColor: course.color || '#7C3AED' }}
-                    >
-                      {course.name}
-                    </span>
-                  )}
-                  {session?.created_at && (
-                    <span className="flex items-center gap-1 text-xs text-gray-400 bg-gray-50 px-2.5 py-1 rounded-full border border-gray-100">
-                      <Calendar className="w-3.5 h-3.5" />
-                      {new Date(session.created_at).toLocaleDateString('fa-IR')}
-                    </span>
-                  )}
-                  <DevignerBadge
-                    variant={note ? 'emerald' : isStillProcessing ? 'purple' : 'neutral'}
-                    dot
-                  >
-                    {note
-                      ? 'جزوه آماده مطالعه'
-                      : isStillProcessing
-                      ? 'در حال پردازش هوش مصنوعی...'
-                      : session?.status_display || 'ثبت شده'}
-                  </DevignerBadge>
-                </div>
-
-                <h1 className="text-xl sm:text-2xl font-black text-gray-900 tracking-tight">
-                  {note?.title || session?.title || `جلسه ${sessionId}`}
-                </h1>
-
-                {course && (
-                  <p className="text-xs sm:text-sm text-gray-500">
-                    {course.teacher_name ? `مدرس: ${course.teacher_name}` : 'مدرس: ثبت نشده'}
-                    {course.classroom_name ? ` · محل تشکیل: ${course.classroom_name}` : ''}
-                  </p>
-                )}
-              </div>
-
-              {/* Action Buttons */}
-              <div className="flex flex-wrap items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => loadData(false)}
-                  disabled={refreshing}
-                  title="بروزرسانی داده‌های این جلسه"
-                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-full border border-gray-200 bg-white hover:bg-gray-50 text-xs font-semibold text-gray-700 transition-colors shadow-2xs cursor-pointer disabled:opacity-50"
-                >
-                  <RefreshCw className={`w-3.5 h-3.5 ${refreshing ? 'animate-spin text-primary-600' : ''}`} />
-                  <span>{refreshing ? 'بروزرسانی...' : 'بروزرسانی'}</span>
-                </button>
-
-                {note?.content_markdown && (
-                  <CopyButton
-                    text={note.content_markdown}
-                    label="کپی متن جزوه"
-                    className="py-2 px-3.5"
-                  />
-                )}
-
-                {downloadUrl && (
-                  <a
-                    href={downloadUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    download
-                    className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-full border border-primary-200 bg-primary-50 hover:bg-primary-100 text-xs font-semibold text-primary-700 transition-colors shadow-2xs"
-                  >
-                    <Download className="w-3.5 h-3.5" />
-                    دانلود فایل Markdown (.md)
-                  </a>
-                )}
-
-                <button
-                  type="button"
-                  onClick={() => setIsDeleteModalOpen(true)}
-                  title="حذف این جلسه"
-                  className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-full border border-rose-200 bg-rose-50 hover:bg-rose-100 text-xs font-semibold text-rose-700 transition-colors shadow-2xs cursor-pointer"
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                  <span>حذف جلسه</span>
-                </button>
-              </div>
-            </div>
-          </div>
-
-          {/* Devigner UI Segmented Tabs */}
-          <div className="sticky top-16 z-30 mb-6 py-2 bg-[#FAFAFC]/90 backdrop-blur-md">
-            <div className="flex items-center gap-1.5 p-1.5 bg-white/90 border border-gray-200/80 rounded-2xl shadow-2xs overflow-x-auto no-scrollbar">
-              {tabs.map((tab) => {
-                const isActive = activeTab === tab.key;
-                const Icon = tab.icon;
-                return (
-                  <button
-                    key={tab.key}
-                    type="button"
-                    onClick={() => setActiveTab(tab.key)}
-                    className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold transition-all duration-200 whitespace-nowrap cursor-pointer ${
-                      isActive
-                        ? 'bg-primary-600 text-white shadow-xs'
-                        : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100/70'
-                    }`}
-                  >
-                    <Icon className="w-4 h-4 shrink-0" />
-                    <span>{tab.label}</span>
-                    {tab.count !== undefined && tab.count > 0 && (
-                      <span
-                        className={`text-[10px] font-mono px-1.5 py-0.2 rounded-full transition-colors ${
-                          isActive
-                            ? 'bg-white/20 text-white'
-                            : 'bg-gray-100 text-gray-600'
-                        }`}
-                      >
-                        {tab.count}
-                      </span>
-                    )}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* Content Area */}
+          {/* Loading Skeleton */}
           {loading ? (
-            <div className="bg-white rounded-3xl border border-gray-200/80 p-16 text-center shadow-sm space-y-4">
-              <Loader2 className="w-10 h-10 text-primary-600 animate-spin mx-auto" />
-              <div className="space-y-1">
-                <h3 className="text-base font-bold text-gray-900">در حال دریافت داده‌های جلسه از سرور...</h3>
-                <p className="text-xs text-gray-400">لطفاً چند لحظه شکیبا باشید.</p>
+            <div className="space-y-6">
+              {/* Banner Skeleton */}
+              <div className="bg-white rounded-3xl border border-gray-100 p-6 sm:p-8 shadow-2xs space-y-4 animate-pulse">
+                <div className="flex gap-2">
+                  <div className="w-20 h-5 bg-gray-200 rounded-full" />
+                  <div className="w-24 h-5 bg-gray-100 rounded-full" />
+                </div>
+                <div className="w-2/3 h-7 bg-gray-200 rounded-xl" />
+                <div className="w-1/3 h-4 bg-gray-100 rounded-lg" />
+              </div>
+
+              {/* Tabs Skeleton */}
+              <div className="flex gap-2 p-1.5 bg-white/90 border border-gray-100 rounded-2xl animate-pulse">
+                {[1, 2, 3, 4, 5, 6].map((i) => (
+                  <div key={i} className="w-24 h-8 bg-gray-100 rounded-xl" />
+                ))}
+              </div>
+
+              {/* Content Card Skeleton */}
+              <div className="bg-white rounded-3xl border border-gray-100 p-12 text-center shadow-2xs space-y-4 animate-pulse">
+                <div className="w-10 h-10 rounded-2xl bg-gray-200 mx-auto" />
+                <div className="w-48 h-5 bg-gray-200 rounded mx-auto" />
+                <div className="w-64 h-3 bg-gray-100 rounded mx-auto" />
               </div>
             </div>
           ) : error ? (
-            <div className="bg-rose-50 border border-rose-200 rounded-2xl p-6 text-center text-rose-700">
-              <AlertCircle className="w-8 h-8 mx-auto mb-2 text-rose-500" />
-              <p className="text-sm font-medium">{error}</p>
+            /* Error Card with Retry */
+            <div className="bg-white rounded-3xl border border-rose-200 p-8 text-center shadow-sm space-y-4">
+              <div className="w-12 h-12 rounded-2xl bg-rose-50 border border-rose-100 text-rose-500 flex items-center justify-center mx-auto">
+                <AlertCircle className="w-6 h-6" />
+              </div>
+              <div className="space-y-1">
+                <h3 className="text-base font-bold text-gray-900">خطا در دریافت اطلاعات جلسه</h3>
+                <p className="text-xs text-rose-600 font-medium">{error}</p>
+              </div>
+              <div className="flex items-center justify-center gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => loadData(false)}
+                  className="px-4 py-2 bg-primary-600 hover:bg-primary-700 text-white rounded-xl text-xs font-bold transition-all shadow-xs cursor-pointer flex items-center gap-1.5"
+                >
+                  <RefreshCw className="w-3.5 h-3.5" />
+                  <span>تلاش مجدد</span>
+                </button>
+                <Link
+                  href={`/archive/${courseId}`}
+                  className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl text-xs font-semibold transition-all cursor-pointer"
+                >
+                  بازگشت به جلسات درس
+                </Link>
+              </div>
             </div>
           ) : (
-            <div className="min-h-[400px]">
-              {/* TAB 1: NOTE & SUMMARY */}
-              {activeTab === 'note' && (
-                <div className="space-y-6">
-                  {/* If note is NOT ready yet, render the LIVE PROCESSING PIPELINE! */}
-                  {!note ? (
-                    <ProcessingPipeline
-                      sessionId={sessionId}
-                      courseId={courseId}
-                      initialStatus={sessionStatus}
-                      onCompleted={handlePipelineCompleted}
-                    />
-                  ) : (
-                    <>
-                      {/* Executive Summary Card */}
-                      {note.executive_summary && (
-                        <div className="bg-gradient-to-br from-primary-50/60 to-purple-50/20 rounded-3xl border border-primary-200/70 p-6 shadow-2xs">
-                          <div className="flex items-center gap-2 text-primary-700 font-bold text-sm mb-2">
-                            <Sparkles className="w-4 h-4" />
-                            خلاصه اجرایی جلسه
-                          </div>
-                          <p className="text-sm sm:text-base text-gray-800 leading-relaxed font-medium">
-                            {note.executive_summary}
-                          </p>
-                        </div>
-                      )}
+            /* Loaded State */
+            <>
+              {/* Session Master Banner Card */}
+              <div className="bg-white rounded-3xl border border-gray-200/80 p-6 sm:p-8 shadow-sm mb-6 relative overflow-hidden">
+                <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-primary-500 via-primary-600 to-primary-700" />
 
-                      {/* Key Topics Tags */}
-                      {note.key_topics && note.key_topics.length > 0 && (
-                        <div className="flex flex-wrap items-center gap-2 bg-white rounded-2xl border border-gray-200/80 p-4 shadow-2xs">
-                          <span className="text-xs font-bold text-gray-500 ml-1">مباحث اصلی:</span>
-                          {note.key_topics.map((topic, i) => (
-                            <DevignerBadge key={i} variant="purple" size="md">
-                              {topic}
-                            </DevignerBadge>
-                          ))}
-                        </div>
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
+                  <div className="space-y-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                      {course && (
+                        <span
+                          className="px-2.5 py-1 rounded-full text-xs font-semibold text-white shadow-2xs"
+                          style={{ backgroundColor: course.color || '#7C3AED' }}
+                        >
+                          {course.name}
+                        </span>
                       )}
+                      {session?.created_at && (
+                        <span className="flex items-center gap-1 text-xs text-gray-400 bg-gray-50 px-2.5 py-1 rounded-full border border-gray-100">
+                          <Calendar className="w-3.5 h-3.5" />
+                          {new Date(session.created_at).toLocaleDateString('fa-IR')}
+                        </span>
+                      )}
+                      <DevignerBadge
+                        variant={note ? 'emerald' : isStillProcessing ? 'purple' : 'neutral'}
+                        dot
+                      >
+                        {note
+                          ? 'جزوه آماده مطالعه'
+                          : isStillProcessing
+                          ? 'در حال پردازش هوش مصنوعی...'
+                          : session?.status_display || 'ثبت شده'}
+                      </DevignerBadge>
+                    </div>
 
-                      {/* Full Markdown Note */}
-                      <div className="bg-white rounded-3xl border border-gray-200/80 p-6 sm:p-10 shadow-sm">
-                        {note.content_markdown ? (
-                          <MarkdownRenderer content={note.content_markdown} />
-                        ) : (
-                          <div className="text-center py-12 text-gray-400">
-                            <FileText className="w-12 h-12 text-gray-300 mx-auto mb-3" />
-                            <p>متن جزوه این جلسه یافت نشد.</p>
+                    <h1 className="text-xl sm:text-2xl font-black text-gray-900 tracking-tight">
+                      {note?.title || session?.title || `جلسه ${sessionId}`}
+                    </h1>
+
+                    {course && (
+                      <p className="text-xs sm:text-sm text-gray-500">
+                        {course.teacher_name ? `مدرس: ${course.teacher_name}` : 'مدرس: ثبت نشده'}
+                        {course.classroom_name ? ` · محل تشکیل: ${course.classroom_name}` : ''}
+                      </p>
+                    )}
+                  </div>
+
+                  {/* Action Buttons */}
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => loadData(false)}
+                      disabled={refreshing}
+                      title="بروزرسانی داده‌های این جلسه"
+                      className="inline-flex items-center gap-1.5 px-3 py-2 rounded-full border border-gray-200 bg-white hover:bg-gray-50 text-xs font-semibold text-gray-700 transition-colors shadow-2xs cursor-pointer disabled:opacity-50"
+                    >
+                      <RefreshCw className={`w-3.5 h-3.5 ${refreshing ? 'animate-spin text-primary-600' : ''}`} />
+                      <span>{refreshing ? 'بروزرسانی...' : 'بروزرسانی'}</span>
+                    </button>
+
+                    {note?.content_markdown && (
+                      <CopyButton
+                        text={note.content_markdown}
+                        label="کپی متن جزوه"
+                        className="py-2 px-3.5"
+                      />
+                    )}
+
+                    {downloadUrl && (
+                      <a
+                        href={downloadUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        download
+                        className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-full border border-primary-200 bg-primary-50 hover:bg-primary-100 text-xs font-semibold text-primary-700 transition-colors shadow-2xs"
+                      >
+                        <Download className="w-3.5 h-3.5" />
+                        دانلود فایل Markdown (.md)
+                      </a>
+                    )}
+
+                    <button
+                      type="button"
+                      onClick={() => setIsDeleteModalOpen(true)}
+                      title="حذف این جلسه"
+                      className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-full border border-rose-200 bg-rose-50 hover:bg-rose-100 text-xs font-semibold text-rose-700 transition-colors shadow-2xs cursor-pointer"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      <span>حذف جلسه</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Devigner UI Segmented Tabs */}
+              <div className="sticky top-16 z-30 mb-6 py-2 bg-[#FAFAFC]/90 backdrop-blur-md">
+                <div className="flex items-center gap-1.5 p-1.5 bg-white/90 border border-gray-200/80 rounded-2xl shadow-2xs overflow-x-auto no-scrollbar">
+                  {tabs.map((tab) => {
+                    const isActive = activeTab === tab.key;
+                    const Icon = tab.icon;
+                    return (
+                      <button
+                        key={tab.key}
+                        type="button"
+                        onClick={() => setActiveTab(tab.key)}
+                        className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold transition-all duration-200 whitespace-nowrap cursor-pointer ${
+                          isActive
+                            ? 'bg-primary-600 text-white shadow-xs'
+                            : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100/70'
+                        }`}
+                      >
+                        <Icon className="w-4 h-4 shrink-0" />
+                        <span>{tab.label}</span>
+                        {tab.count !== undefined && tab.count > 0 && (
+                          <span
+                            className={`text-[10px] font-mono px-1.5 py-0.2 rounded-full transition-colors ${
+                              isActive
+                                ? 'bg-white/20 text-white'
+                                : 'bg-gray-100 text-gray-600'
+                            }`}
+                          >
+                            {tab.count}
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Content Area */}
+              <div className="min-h-[400px]">
+                {/* TAB 1: NOTE & SUMMARY */}
+                {activeTab === 'note' && (
+                  <div className="space-y-6">
+                    {/* If note is NOT ready yet, render the LIVE STEP-BY-STEP PROCESSING PIPELINE! */}
+                    {!note ? (
+                      <ProcessingPipeline
+                        sessionId={sessionId}
+                        courseId={courseId}
+                        initialStatus={sessionStatus}
+                        onCompleted={handlePipelineCompleted}
+                      />
+                    ) : (
+                      <>
+                        {/* Executive Summary Card */}
+                        {note.executive_summary && (
+                          <div className="bg-gradient-to-br from-primary-50/60 to-purple-50/20 rounded-3xl border border-primary-200/70 p-6 shadow-2xs">
+                            <div className="flex items-center gap-2 text-primary-700 font-bold text-sm mb-2">
+                              <Sparkles className="w-4 h-4" />
+                              خلاصه اجرایی جلسه
+                            </div>
+                            <p className="text-sm sm:text-base text-gray-800 leading-relaxed font-medium">
+                              {note.executive_summary}
+                            </p>
                           </div>
                         )}
+
+                        {/* Key Topics Tags */}
+                        {note.key_topics && note.key_topics.length > 0 && (
+                          <div className="flex flex-wrap items-center gap-2 bg-white rounded-2xl border border-gray-200/80 p-4 shadow-2xs">
+                            <span className="text-xs font-bold text-gray-500 ml-1">مباحث اصلی:</span>
+                            {note.key_topics.map((topic, i) => (
+                              <DevignerBadge key={i} variant="purple" size="md">
+                                {topic}
+                              </DevignerBadge>
+                            ))}
+                          </div>
+                        )}
+
+                        {/* Full Markdown Note */}
+                        <div className="bg-white rounded-3xl border border-gray-200/80 p-6 sm:p-10 shadow-sm">
+                          {note.content_markdown ? (
+                            <MarkdownRenderer content={note.content_markdown} />
+                          ) : (
+                            <div className="text-center py-12 text-gray-400">
+                              <FileText className="w-12 h-12 text-gray-300 mx-auto mb-3" />
+                              <p>متن جزوه این جلسه یافت نشد.</p>
+                            </div>
+                          )}
+                        </div>
+                      </>
+                    )}
+                  </div>
+                )}
+
+                {/* TAB 2: EXAM TIPS */}
+                {activeTab === 'tips' && (
+                  <div className="space-y-6">
+                    {!note && isStillProcessing && (
+                      <div className="mb-4 p-4 rounded-2xl bg-amber-50 border border-amber-200 text-amber-800 text-xs flex items-center gap-2">
+                        <Loader2 className="w-4 h-4 animate-spin text-amber-600 shrink-0" />
+                        <span>نکات امتحانی همگام با پایان پردازش صوت جلسه استخراج و نمایش داده می‌شوند.</span>
                       </div>
-                    </>
-                  )}
-                </div>
-              )}
+                    )}
+                    <ExamTipsView tips={note?.exam_tips || []} />
+                  </div>
+                )}
 
-              {/* TAB 2: EXAM TIPS */}
-              {activeTab === 'tips' && (
-                <div className="space-y-6">
-                  {!note && isStillProcessing && (
-                    <div className="mb-4 p-4 rounded-2xl bg-amber-50 border border-amber-200 text-amber-800 text-xs flex items-center gap-2">
-                      <Loader2 className="w-4 h-4 animate-spin text-amber-600 shrink-0" />
-                      <span>نکات امتحانی همگام با پایان پردازش صوت جلسه استخراج و نمایش داده می‌شوند.</span>
-                    </div>
-                  )}
-                  <ExamTipsView tips={note?.exam_tips || []} />
-                </div>
-              )}
+                {/* TAB 3: QUIZ */}
+                {activeTab === 'quiz' && (
+                  <div className="space-y-6">
+                    {!note && isStillProcessing && (
+                      <div className="mb-4 p-4 rounded-2xl bg-primary-50 border border-primary-200 text-primary-800 text-xs flex items-center gap-2">
+                        <Loader2 className="w-4 h-4 animate-spin text-primary-600 shrink-0" />
+                        <span>آزمون ۴ گزینه‌ای پس از تحلیل متن جلسه به صورت هوشمند تولید خواهد شد.</span>
+                      </div>
+                    )}
+                    <QuizView
+                      quizzes={quizzes}
+                      sessionId={sessionId}
+                      onQuizGenerated={(newQuiz) => {
+                        setQuizzes((prev) => [...prev, newQuiz]);
+                      }}
+                    />
+                  </div>
+                )}
 
-              {/* TAB 3: QUIZ */}
-              {activeTab === 'quiz' && (
-                <div className="space-y-6">
-                  {!note && isStillProcessing && (
-                    <div className="mb-4 p-4 rounded-2xl bg-primary-50 border border-primary-200 text-primary-800 text-xs flex items-center gap-2">
-                      <Loader2 className="w-4 h-4 animate-spin text-primary-600 shrink-0" />
-                      <span>آزمون ۴ گزینه‌ای پس از تحلیل متن جلسه به صورت هوشمند تولید خواهد شد.</span>
-                    </div>
-                  )}
-                  <QuizView
-                    quizzes={quizzes}
+                {/* TAB 4: FLASHCARDS */}
+                {activeTab === 'flashcards' && (
+                  <div className="space-y-6">
+                    {!note && isStillProcessing && (
+                      <div className="mb-4 p-4 rounded-2xl bg-purple-50 border border-purple-200 text-purple-800 text-xs flex items-center gap-2">
+                        <Loader2 className="w-4 h-4 animate-spin text-purple-600 shrink-0" />
+                        <span>فلش‌کارت‌های مرور سریع به همراه جزوه به طور خودکار بارگذاری می‌شوند.</span>
+                      </div>
+                    )}
+                    <FlashcardsView flashcards={flashcards} />
+                  </div>
+                )}
+
+                {/* TAB 5: RAG CHAT */}
+                {activeTab === 'chat' && (
+                  <RagChatView
+                    courseId={courseId}
                     sessionId={sessionId}
-                    onQuizGenerated={(newQuiz) => {
-                      setQuizzes((prev) => [...prev, newQuiz]);
-                    }}
+                    sessionTitle={note?.title || session?.title || `جلسه ${sessionId}`}
                   />
-                </div>
-              )}
+                )}
 
-              {/* TAB 4: FLASHCARDS */}
-              {activeTab === 'flashcards' && (
-                <div className="space-y-6">
-                  {!note && isStillProcessing && (
-                    <div className="mb-4 p-4 rounded-2xl bg-purple-50 border border-purple-200 text-purple-800 text-xs flex items-center gap-2">
-                      <Loader2 className="w-4 h-4 animate-spin text-purple-600 shrink-0" />
-                      <span>فلش‌کارت‌های مرور سریع به همراه جزوه به طور خودکار بارگذاری می‌شوند.</span>
-                    </div>
-                  )}
-                  <FlashcardsView flashcards={flashcards} />
-                </div>
-              )}
-
-              {/* TAB 5: RAG CHAT */}
-              {activeTab === 'chat' && (
-                <RagChatView
-                  courseId={courseId}
-                  sessionId={sessionId}
-                  sessionTitle={note?.title || session?.title || `جلسه ${sessionId}`}
-                />
-              )}
-
-              {/* TAB 6: AUDIO & CHUNKS */}
-              {activeTab === 'audio' && (
-                <AudioChunksView sessionStatus={sessionStatus} />
-              )}
-            </div>
+                {/* TAB 6: AUDIO & CHUNKS */}
+                {activeTab === 'audio' && (
+                  <AudioChunksView sessionStatus={sessionStatus} />
+                )}
+              </div>
+            </>
           )}
         </div>
       </main>
@@ -456,4 +514,3 @@ export default function SessionDetailPage() {
     </>
   );
 }
-

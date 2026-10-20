@@ -67,6 +67,7 @@ export default function RecordPage() {
   const [uploadingFile, setUploadingFile] = useState(false);
 
   const [showCourseDropdown, setShowCourseDropdown] = useState(false);
+  const [creatingSession, setCreatingSession] = useState(false);
   const [error, setError] = useState('');
   const [step, setStep] = useState('setup'); // 'setup' | 'recording' | 'done'
 
@@ -133,12 +134,15 @@ export default function RecordPage() {
       return;
     }
     setError('');
+    setCreatingSession(true);
     try {
       const session = await createSession(selectedCourse, sessionTitle.trim());
       setSessionId(session.id);
       setStep('recording');
-    } catch {
-      setError('خطا در ایجاد جلسه. لطفاً مجدداً امتحان کنید.');
+    } catch (err) {
+      setError(err?.message || 'خطا در ایجاد جلسه در سرور. لطفاً مجدداً امتحان کنید.');
+    } finally {
+      setCreatingSession(false);
     }
   };
 
@@ -219,10 +223,10 @@ export default function RecordPage() {
     setError('');
     try {
       await finalizeSession(sessionId);
-      setFinalized(true);
+      setFinalized(false);
       setStep('done');
-    } catch {
-      setError('خطا در نهایی‌سازی جلسه. لطفاً مجدداً تلاش کنید.');
+    } catch (err) {
+      setError(err?.message || 'خطا در نهایی‌سازی جلسه. لطفاً مجدداً تلاش کنید.');
     } finally {
       setFinalizing(false);
     }
@@ -370,10 +374,20 @@ export default function RecordPage() {
               <button
                 type="button"
                 onClick={handleStartSession}
-                className="w-full bg-primary-600 hover:bg-primary-700 text-white font-bold py-3.5 rounded-2xl transition-all shadow-sm cursor-pointer flex items-center justify-center gap-2"
+                disabled={creatingSession}
+                className="w-full bg-primary-600 hover:bg-primary-700 text-white font-bold py-3.5 rounded-2xl transition-all shadow-sm cursor-pointer flex items-center justify-center gap-2 disabled:opacity-60"
               >
-                <Radio className="w-4 h-4" />
-                شروع زنگ و ورود به محیط ضبط
+                {creatingSession ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>در حال ایجاد جلسه در سرور...</span>
+                  </>
+                ) : (
+                  <>
+                    <Radio className="w-4 h-4" />
+                    <span>شروع زنگ و ورود به محیط ضبط</span>
+                  </>
+                )}
               </button>
             </div>
           )}
